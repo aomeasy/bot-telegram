@@ -5,6 +5,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from flask import Flask
+from threading import Thread
 
 # ตั้งค่า logging
 logging.basicConfig(
@@ -15,6 +17,17 @@ logger = logging.getLogger(__name__)
 
 # ใส่ Bot Token ของคุณที่นี่
 BOT_TOKEN = "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY"
+
+# สร้าง Flask app สำหรับ Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "✅ Bot is running!", 200
+
+@app.route('/health')
+def health():
+    return "OK", 200
 
 def calculate_rsi(prices, period=14):
     """คำนวณ RSI (Relative Strength Index)"""
@@ -64,7 +77,6 @@ def get_stock_analysis(symbol):
         bb_lower, bb_upper = calculate_bollinger_bands(prices)
         ema_20 = calculate_ema(prices, 20)
         ema_50 = calculate_ema(prices, 50)
-        ema_50_200_trend = "ขาขึ้น 🟢" if calculate_ema(prices, 50) > calculate_ema(prices, 200) else "โกลด์เดนครอส 🟢" if calculate_ema(prices, 50) > calculate_ema(prices, 200) else "โกลด์เดนครอส 🟢"
         
         # กำหนดสัญญาณ
         rsi_signal = "กลาง ⚪" if 30 < rsi < 70 else "ต่ำ 🟢" if rsi <= 30 else "สูง 🔴"
@@ -73,6 +85,7 @@ def get_stock_analysis(symbol):
         
         # สถานะ EMA
         ema_20_50_status = "ขาขึ้น 🟢" if ema_20 > ema_50 else "โกลด์เดนครอส 🟢"
+        ema_50_200_trend = "ขาขึ้น 🟢" if calculate_ema(prices, 50) > calculate_ema(prices, 200) else "โกลด์เดนครอส 🟢"
         
         # คำนวณ OBV (On Balance Volume) - simplified
         obv_trend = "เพิ่มขึ้น 📈" if hist['Volume'].iloc[-5:].mean() > hist['Volume'].iloc[-10:-5].mean() else "ลดลง 📉"
@@ -157,22 +170,37 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """จัดการ error"""
     logger.error(f"Update {update} caused error {context.error}")
 
+def run_bot():
+    """รัน Telegram Bot"""
+    try:
+        # สร้าง Application
+        application = Application.builder().token(BOT_TOKEN).build()
+        
+        # เพิ่ม handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
+        
+        # เพิ่ม error handler
+        application.add_error_handler(error_handler)
+        
+        # เริ่มรัน bot
+        logger.info("🚀 Telegram Bot started!")
+        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    except Exception as e:
+        logger.error(f"❌ Failed to start bot: {e}")
+
 def main():
-    """ฟังก์ชันหลักในการรัน bot"""
-    # สร้าง Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    """ฟังก์ชันหลัก - รัน Flask และ Bot พร้อมกัน"""
+    # รัน bot ใน thread แยก
+    bot_thread = Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
     
-    # เพิ่ม handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
-    
-    # เพิ่ม error handler
-    application.add_error_handler(error_handler)
-    
-    # เริ่มรัน bot
-    logger.info("Bot started!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # รัน Flask web server
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"🌐 Flask server starting on port {port}")
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == '__main__':
     main()
