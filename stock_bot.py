@@ -92,15 +92,23 @@ def get_stock_analysis(symbol):
         
         # สร้างข้อความวิเคราะห์
         analysis = f"""📊 {symbol.upper()}
-โมเมนตัมราคา: {'แนวโน้มเป็นขาลง 📉' if current_price < ema_20 else 'แนวโน้มเป็นขาขึ้น 📈'}
 
-RSI: {rsi_signal}  MACD: {macd_signal}
-ผันผวน: {trend}  ราคาเฉลี่ย 5 วัน: {current_price:.2f} 📊
-โบลลิงเจอร์ (20): {bb_lower:.2f} – {bb_upper:.2f} 🟡
-EMA 20/50: {ema_20_50_status}
+โมเมนตัมราคา: {'แนวโน้มเป็นขาลง 📉' if current_price < ema_20 else 'แนวโน้มเป็นขาขึ้น 📈'}
+RSI: {rsi_signal}
+MACD: {macd_signal}
+ผันผวน: {trend}
+
+ราคาเฉลี่ย 5 วัน: {current_price:.2f}
+
+📊 โบลลิงเจอร์ (20): {bb_lower:.2f} – {bb_upper:.2f}
+
+🟡 EMA 20/50: {ema_20_50_status}
 EMA 50/200: {ema_50_200_trend}
+
 OBV สำสูด: {obv_trend}
-แนวรับ: {bb_lower:.2f} แนวต้าน: {bb_upper:.2f}
+
+แนวรับ: {bb_lower:.2f}
+แนวต้าน: {bb_upper:.2f}
 
 *เพื่อเป็นข้อมูล ไม่ใช่คำแนะนำการลงทุน**"""
         
@@ -112,9 +120,9 @@ OBV สำสูด: {obv_trend}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ฟังก์ชันเริ่มต้นเมื่อใช้คำสั่ง /start"""
-    welcome_message = """🤖 ยินดีต้อนรับสู่ Stock Analysis Bot!
+    welcome_message = """🤖 ยินดีต้อนรับสู่ Stock Analysis Bot! 📈
 
-📈 คำสั่งที่ใช้ได้:
+คำสั่งที่ใช้ได้:
 • พิมพ์ชื่อหุ้น (เช่น AAPL, TSLA, GOOGL)
 • /start - แสดงข้อความต้อนรับ
 • /help - แสดงคำสั่งทั้งหมด
@@ -139,8 +147,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • EMA - Exponential Moving Average
 • OBV - On Balance Volume
 
-⚠️ หมายเหตุ: ข้อมูลนี้เพื่อการศึกษาเท่านั้น
-ไม่ใช่คำแนะนำการลงทุน"""
+⚠️ หมายเหตุ: ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน"""
     
     await update.message.reply_text(help_text)
 
@@ -170,15 +177,23 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """จัดการ error"""
     logger.error(f"Update {update} caused error {context.error}")
 
-def run_bot():
-    """รัน Telegram Bot"""
-    import asyncio
-    
-    # สร้าง event loop ใหม่สำหรับ thread นี้
-    asyncio.set_event_loop(asyncio.new_event_loop())
-    
+def run_flask():
+    """รัน Flask web server ใน thread แยก"""
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"🌐 Flask server starting on port {port}")
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
+
+def main():
+    """ฟังก์ชันหลัก - รัน Flask และ Bot พร้อมกัน"""
     try:
-        # สร้าง Application
+        # รัน Flask ใน thread แยก (ไม่ใช่ bot)
+        flask_thread = Thread(target=run_flask)
+        flask_thread.daemon = True
+        flask_thread.start()
+        
+        logger.info("🚀 Starting Telegram Bot in main thread...")
+        
+        # สร้าง Application และรันใน main thread
         application = Application.builder().token(BOT_TOKEN).build()
         
         # เพิ่ม handlers
@@ -189,23 +204,16 @@ def run_bot():
         # เพิ่ม error handler
         application.add_error_handler(error_handler)
         
-        # เริ่มรัน bot
-        logger.info("🚀 Telegram Bot started!")
-        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        # เริ่มรัน bot ใน main thread
+        logger.info("✅ Telegram Bot is now running!")
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+        
     except Exception as e:
-        logger.error(f"❌ Failed to start bot: {e}")
-
-def main():
-    """ฟังก์ชันหลัก - รัน Flask และ Bot พร้อมกัน"""
-    # รัน bot ใน thread แยก
-    bot_thread = Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # รัน Flask web server
-    port = int(os.environ.get('PORT', 10000))
-    logger.info(f"🌐 Flask server starting on port {port}")
-    app.run(host='0.0.0.0', port=port)
+        logger.error(f"❌ Failed to start: {e}")
+        raise
 
 if __name__ == '__main__':
     main()
