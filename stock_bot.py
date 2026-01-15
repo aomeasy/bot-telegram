@@ -120,6 +120,7 @@ OBV สำสูด: {obv_trend}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ฟังก์ชันเริ่มต้นเมื่อใช้คำสั่ง /start"""
+    logger.info(f"🚀 /start command from user: {update.effective_user.id}")
     welcome_message = """🤖 ยินดีต้อนรับสู่ Stock Analysis Bot! 📈
 
 คำสั่งที่ใช้ได้:
@@ -153,10 +154,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """วิเคราะห์หุ้นตาม symbol ที่ผู้ใช้พิมพ์"""
-    user_input = update.message.text.strip().upper()
+    # ตรวจสอบว่ามี message และ text หรือไม่
+    if not update.message or not update.message.text:
+        return
     
-    # ตรวจสอบว่าเป็น symbol หุ้นหรือไม่
-    if len(user_input) > 10 or not user_input.isalpha():
+    user_input = update.message.text.strip().upper()
+    logger.info(f"📩 Received message: {user_input}")
+    
+    # ตรวจสอบว่าเป็น symbol หุ้นหรือไม่ (1-10 ตัวอักษร)
+    if len(user_input) < 1 or len(user_input) > 10 or not user_input.isalpha():
+        logger.info(f"❌ Invalid symbol: {user_input}")
         return
     
     # ส่งข้อความแจ้งว่ากำลังประมวลผล
@@ -199,7 +206,10 @@ def main():
         # เพิ่ม handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
+        application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE, 
+            analyze_stock
+        ))
         
         # เพิ่ม error handler
         application.add_error_handler(error_handler)
