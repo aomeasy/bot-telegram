@@ -172,6 +172,11 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     """รัน Telegram Bot"""
+    import asyncio
+    
+    # สร้าง event loop ใหม่สำหรับ thread นี้
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    
     try:
         # สร้าง Application
         application = Application.builder().token(BOT_TOKEN).build()
