@@ -1,146 +1,178 @@
 import os
-import telebot
+import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
+import numpy as np
 
-# ตั้งค่า Bot Token (ได้จาก @BotFather)
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-bot = telebot.TeleBot(BOT_TOKEN)
+# ตั้งค่า logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-def calculate_rsi(data, period=14):
-    """คำนวณ RSI"""
-    delta = data['Close'].diff()
+# ใส่ Bot Token ของคุณที่นี่
+BOT_TOKEN = "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY"
+
+def calculate_rsi(prices, period=14):
+    """คำนวณ RSI (Relative Strength Index)"""
+    delta = prices.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi.iloc[-1]
 
-def calculate_macd(data):
+def calculate_macd(prices):
     """คำนวณ MACD"""
-    exp1 = data['Close'].ewm(span=12, adjust=False).mean()
-    exp2 = data['Close'].ewm(span=26, adjust=False).mean()
+    exp1 = prices.ewm(span=12, adjust=False).mean()
+    exp2 = prices.ewm(span=26, adjust=False).mean()
     macd = exp1 - exp2
     signal = macd.ewm(span=9, adjust=False).mean()
     return macd.iloc[-1], signal.iloc[-1]
 
-def calculate_ema(data, period):
-    """คำนวณ EMA"""
-    return data['Close'].ewm(span=period, adjust=False).mean().iloc[-1]
-
-def calculate_bollinger(data, period=20):
+def calculate_bollinger_bands(prices, period=20):
     """คำนวณ Bollinger Bands"""
-    sma = data['Close'].rolling(window=period).mean()
-    std = data['Close'].rolling(window=period).std()
-    upper = sma + (std * 2)
-    lower = sma - (std * 2)
-    return lower.iloc[-1], upper.iloc[-1]
+    sma = prices.rolling(window=period).mean()
+    std = prices.rolling(window=period).std()
+    upper_band = sma + (std * 2)
+    lower_band = sma - (std * 2)
+    return lower_band.iloc[-1], upper_band.iloc[-1]
+
+def calculate_ema(prices, period):
+    """คำนวณ EMA (Exponential Moving Average)"""
+    return prices.ewm(span=period, adjust=False).mean().iloc[-1]
 
 def get_stock_analysis(symbol):
-    """วิเคราะห์หุ้นและส่งกลับข้อมูล"""
+    """วิเคราะห์หุ้นแบบครบวงจร"""
     try:
         # ดึงข้อมูลหุ้น
         stock = yf.Ticker(symbol)
-        data = stock.history(period="6mo")
+        hist = stock.history(period="6mo")
         
-        if data.empty:
-            return "❌ ไม่พบข้อมูลหุ้น กรุณาตรวจสอบสัญลักษณ์หุ้น"
+        if hist.empty:
+            return None
         
-        # ข้อมูลปัจจุบัน
-        current_price = data['Close'].iloc[-1]
-        prev_close = data['Close'].iloc[-2]
-        change = current_price - prev_close
-        change_percent = (change / prev_close) * 100
+        current_price = hist['Close'].iloc[-1]
+        prices = hist['Close']
         
-        # คำนวณตัวชี้วัด
-        rsi = calculate_rsi(data)
-        macd, signal = calculate_macd(data)
-        ema20 = calculate_ema(data, 20)
-        ema50 = calculate_ema(data, 50)
-        ema200 = calculate_ema(data, 200)
-        bb_lower, bb_upper = calculate_bollinger(data)
+        # คำนวณตัวชี้วัดทางเทคนิค
+        rsi = calculate_rsi(prices)
+        macd, signal = calculate_macd(prices)
+        bb_lower, bb_upper = calculate_bollinger_bands(prices)
+        ema_20 = calculate_ema(prices, 20)
+        ema_50 = calculate_ema(prices, 50)
+        ema_50_200_trend = "ขาขึ้น 🟢" if calculate_ema(prices, 50) > calculate_ema(prices, 200) else "โกลด์เดนครอส 🟢" if calculate_ema(prices, 50) > calculate_ema(prices, 200) else "โกลด์เดนครอส 🟢"
         
-        # วิเคราะห์สัญญาณ
-        trend_icon = "📈" if change > 0 else "📉"
-        rsi_signal = "🟢" if rsi < 30 else "🔴" if rsi > 70 else "🟡"
-        rsi_text = "กลาง" if 30 <= rsi <= 70 else "oversold" if rsi < 30 else "overbought"
+        # กำหนดสัญญาณ
+        rsi_signal = "กลาง ⚪" if 30 < rsi < 70 else "ต่ำ 🟢" if rsi <= 30 else "สูง 🔴"
+        macd_signal = "สัญญาณลบ 🔴" if macd < signal else "สัญญาณบวก 🟢"
+        trend = "ต่ำ 🟢" if current_price > ema_20 else "ขาขึ้น 🟢"
         
-        macd_signal = "🟢 สัญญาณซื้อ" if macd > signal else "🔴 สัญญาณขาย"
+        # สถานะ EMA
+        ema_20_50_status = "ขาขึ้น 🟢" if ema_20 > ema_50 else "โกลด์เดนครอส 🟢"
         
-        ema_trend = "🟢" if current_price > ema20 > ema50 else "🔴"
-        ema_long = "🟢 โกลเด้นครอส" if ema50 > ema200 else "🔴 เดธครอส"
+        # คำนวณ OBV (On Balance Volume) - simplified
+        obv_trend = "เพิ่มขึ้น 📈" if hist['Volume'].iloc[-5:].mean() > hist['Volume'].iloc[-10:-5].mean() else "ลดลง 📉"
         
-        obv_trend = "🟢 เพิ่มขึ้น" if change > 0 else "🔴 ลดลง"
-        
-        # สร้างข้อความ
-        message = f"""📊 {symbol.upper()}
-{'─' * 35}
-💰 ราคา: ${current_price:.2f} {trend_icon}
-📊 เปลี่ยนแปลง: {change:+.2f} ({change_percent:+.2f}%)
+        # สร้างข้อความวิเคราะห์
+        analysis = f"""📊 {symbol.upper()}
+โมเมนตัมราคา: {'แนวโน้มเป็นขาลง 📉' if current_price < ema_20 else 'แนวโน้มเป็นขาขึ้น 📈'}
 
-📈 ตัวชี้วัดทางเทคนิค:
-{'─' * 35}
-🔸 RSI: {rsi:.2f} {rsi_signal} ({rsi_text})
-🔸 MACD: {macd_signal}
-🔸 ผัยผวน: {ema_trend} ราคาเฉลี่ย 5 วัน: ${ema20:.2f}
-🔸 โบลลิงเจอร์ (20): ${bb_lower:.2f} - ${bb_upper:.2f} 🟡
-🔸 EMA 20/50: {ema_trend}
-🔸 EMA 50/200: {ema_long}
-🔸 OBV ล่าสุด: {obv_trend}
+RSI: {rsi_signal}  MACD: {macd_signal}
+ผันผวน: {trend}  ราคาเฉลี่ย 5 วัน: {current_price:.2f} 📊
+โบลลิงเจอร์ (20): {bb_lower:.2f} – {bb_upper:.2f} 🟡
+EMA 20/50: {ema_20_50_status}
+EMA 50/200: {ema_50_200_trend}
+OBV สำสูด: {obv_trend}
+แนวรับ: {bb_lower:.2f} แนวต้าน: {bb_upper:.2f}
 
-📌 แนวรับ: ${bb_lower:.2f} | แนวต้าน: ${bb_upper:.2f}
-
-⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M')}
-
-*เพื่อเป็นข้อมูล ไม่ใช่คำแนะนำการลงทุน**
-"""
-        return message
+*เพื่อเป็นข้อมูล ไม่ใช่คำแนะนำการลงทุน**"""
+        
+        return analysis
         
     except Exception as e:
-        return f"❌ เกิดข้อผิดพลาด: {str(e)}"
+        logger.error(f"Error analyzing {symbol}: {e}")
+        return None
 
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    """ข้อความต้อนรับ"""
-    welcome_text = """
-🤖 ยินดีต้อนรับสู่ Stock Bot!
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ฟังก์ชันเริ่มต้นเมื่อใช้คำสั่ง /start"""
+    welcome_message = """🤖 ยินดีต้อนรับสู่ Stock Analysis Bot!
 
-📋 คำสั่งที่ใช้ได้:
-• /stock [symbol] - ดูข้อมูลหุ้น
-  ตัวอย่าง: /stock AVGO
-  
-• /help - แสดงคำสั่ง
+📈 คำสั่งที่ใช้ได้:
+• พิมพ์ชื่อหุ้น (เช่น AAPL, TSLA, GOOGL)
+• /start - แสดงข้อความต้อนรับ
+• /help - แสดงคำสั่งทั้งหมด
 
-💡 หรือพิมพ์ชื่อหุ้นโดยตรง เช่น: AVGO, AAPL, TSLA
-"""
-    bot.reply_to(message, welcome_text)
-
-@bot.message_handler(commands=['stock'])
-def stock_command(message):
-    """คำสั่ง /stock"""
-    try:
-        symbol = message.text.split()[1].upper()
-        bot.reply_to(message, "⏳ กำลังดึงข้อมูล...")
-        result = get_stock_analysis(symbol)
-        bot.reply_to(message, result)
-    except IndexError:
-        bot.reply_to(message, "❌ กรุณาระบุสัญลักษณ์หุ้น\nตัวอย่าง: /stock AVGO")
-
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    """รับข้อความทั่วไป"""
-    text = message.text.strip().upper()
+💡 ตัวอย่าง: พิมพ์ "AAPL" เพื่อวิเคราะห์หุ้น Apple"""
     
-    # ตรวจสอบว่าเป็นสัญลักษณ์หุ้นหรือไม่ (2-5 ตัวอักษร)
-    if len(text) >= 2 and len(text) <= 5 and text.isalpha():
-        bot.reply_to(message, "⏳ กำลังดึงข้อมูล...")
-        result = get_stock_analysis(text)
-        bot.reply_to(message, result)
-    else:
-        bot.reply_to(message, "💡 พิมพ์สัญลักษณ์หุ้น เช่น AVGO, AAPL\nหรือใช้คำสั่ง /help")
+    await update.message.reply_text(welcome_message)
 
-# เริ่มต้น Bot
-if __name__ == "__main__":
-    print("🤖 Bot กำลังทำงาน...")
-    bot.infinity_polling()
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ฟังก์ชันแสดงความช่วยเหลือ"""
+    help_text = """📚 วิธีใช้งาน:
+
+1️⃣ พิมพ์ symbol หุ้น (ตัวอักษรภาษาอังกฤษ)
+   ตัวอย่าง: AAPL, MSFT, TSLA, GOOGL
+
+2️⃣ รอสักครู่เพื่อดูผลการวิเคราะห์
+
+📊 ตัวชี้วัดที่ใช้:
+• RSI - Relative Strength Index
+• MACD - Moving Average Convergence Divergence
+• Bollinger Bands
+• EMA - Exponential Moving Average
+• OBV - On Balance Volume
+
+⚠️ หมายเหตุ: ข้อมูลนี้เพื่อการศึกษาเท่านั้น
+ไม่ใช่คำแนะนำการลงทุน"""
+    
+    await update.message.reply_text(help_text)
+
+async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """วิเคราะห์หุ้นตาม symbol ที่ผู้ใช้พิมพ์"""
+    user_input = update.message.text.strip().upper()
+    
+    # ตรวจสอบว่าเป็น symbol หุ้นหรือไม่
+    if len(user_input) > 10 or not user_input.isalpha():
+        return
+    
+    # ส่งข้อความแจ้งว่ากำลังประมวลผล
+    processing_msg = await update.message.reply_text(f"🔍 กำลังวิเคราะห์ {user_input}...")
+    
+    # วิเคราะห์หุ้น
+    analysis = get_stock_analysis(user_input)
+    
+    if analysis:
+        await processing_msg.edit_text(analysis)
+    else:
+        await processing_msg.edit_text(
+            f"❌ ไม่พบข้อมูลหุ้น {user_input}\n"
+            f"กรุณาตรวจสอบ symbol และลองใหม่อีกครั้ง"
+        )
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """จัดการ error"""
+    logger.error(f"Update {update} caused error {context.error}")
+
+def main():
+    """ฟังก์ชันหลักในการรัน bot"""
+    # สร้าง Application
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # เพิ่ม handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
+    
+    # เพิ่ม error handler
+    application.add_error_handler(error_handler)
+    
+    # เริ่มรัน bot
+    logger.info("Bot started!")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
