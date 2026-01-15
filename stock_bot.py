@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from flask import Flask
 from threading import Thread
+import time
 
 # ตั้งค่า logging
 logging.basicConfig(
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 # ใส่ Bot Token ของคุณที่นี่
 BOT_TOKEN = "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY"
+
+# กำหนด User-Agent เพื่อหลีกเลี่ยงการถูกบล็อก
+yf.set_tz_cache_location(os.path.join(os.getcwd(), ".cache"))
 
 # สร้าง Flask app สำหรับ Render
 app = Flask(__name__)
@@ -61,12 +65,32 @@ def calculate_ema(prices, period):
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบวงจร"""
     try:
-        # ดึงข้อมูลหุ้น
-        stock = yf.Ticker(symbol)
-        hist = stock.history(period="6mo")
+        # ดึงข้อมูลหุ้น - เพิ่ม headers เพื่อหลีกเลี่ยง rate limit
+        logger.info(f"🔄 Fetching data for {symbol}...")
         
-        if hist.empty:
+        # ลอง download แทนการใช้ history
+        try:
+            hist = yf.download(
+                symbol, 
+                period="6mo", 
+                progress=False,
+                show_errors=False
+            )
+        except Exception as e:
+            logger.error(f"Download failed: {e}")
+            # Fallback ใช้ Ticker
+            stock = yf.Ticker(symbol)
+            hist = stock.history(period="3mo")
+        
+        if hist is None or hist.empty or len(hist) < 20:
+            logger.error(f"❌ No data found for {symbol}")
             return None
+        
+        logger.info(f"✅ Got {len(hist)} days of data for {symbol}")
+        
+        # ถ้าเป็น MultiIndex (จาก download) ให้แปลงเป็น simple index
+        if isinstance(hist.columns, pd.MultiIndex):
+            hist.columns = hist.columns.droplevel(1)
         
         current_price = hist['Close'].iloc[-1]
         prices = hist['Close']
@@ -168,6 +192,9 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ส่งข้อความแจ้งว่ากำลังประมวลผล
     processing_msg = await update.message.reply_text(f"🔍 กำลังวิเคราะห์ {user_input}...")
+    
+    # เพิ่ม delay เล็กน้อยเพื่อหลีกเลี่ยง rate limit
+    time.sleep(0.5)
     
     # วิเคราะห์หุ้น
     analysis = get_stock_analysis(user_input)
