@@ -15,13 +15,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- ส่วนที่ 2: ดึงค่า Config จาก Environment Variables ---
-# แนะนำให้ตั้งค่าเหล่านี้ใน Render Dashboard -> Environment
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY")
 ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "YOUR_API_KEY_HERE")
-# URL ของแอปคุณบน Render (เช่น https://bot-telegram-vfmz.onrender.com)
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL") 
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# --- ส่วนที่ 3: Stock Logic (คงเดิมตามที่คุณเขียนไว้) ---
+# --- ส่วนที่ 3: Stock Logic ---
 
 def fetch_stock_data(symbol):
     try:
@@ -137,14 +135,25 @@ def get_stock_analysis(symbol):
         logger.error(f"Error analyzing {symbol}: {e}")
         return None
 
-# --- ส่วนที่ 4: Telegram Handlers (คงเดิมตามที่คุณเขียนไว้) ---
+# --- ส่วนที่ 4: Telegram Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈\n\n💡 **วิธีใช้งาน:**\n• พิมพ์ชื่อหุ้น เช่น: AAPL, MSFT\n• /help - ดูคำแนะนำ\n\n✨ ข้อมูลจาก Alpha Vantage API"""
+    welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
+
+💡 **วิธีใช้งาน:**
+• พิมพ์ชื่อหุ้น เช่น: AAPL, MSFT
+• /help - ดูคำแนะนำ
+
+✨ ข้อมูลจาก Alpha Vantage API"""
     await update.message.reply_text(welcome, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """📚 **คู่มือการใช้งาน**\n\n1. พิมพ์ symbol หุ้นภาษาอังกฤษ (1-5 ตัวอักษร)\n2. รอผลการวิเคราะห์สักครู่\n\n⚠️ ข้อมูลเพื่อการศึกษาเท่านั้น"""
+    help_text = """📚 **คู่มือการใช้งาน**
+
+1. พิมพ์ symbol หุ้นภาษาอังกฤษ (1-5 ตัวอักษร)
+2. รอผลการวิเคราะห์สักครู่
+
+⚠️ ข้อมูลเพื่อการศึกษาเท่านั้น"""
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -165,16 +174,9 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
-# --- ส่วนที่ 5: Main Deployment Function (แก้ไขเพื่อให้รันบน Render ได้) ---
+# --- ส่วนที่ 5: Main Function (รองรับทั้ง Webhook และ Polling) ---
 
 def main():
-    # ตรวจสอบการตั้งค่าพื้นฐาน
-    if not WEBHOOK_URL or "onrender.com" not in WEBHOOK_URL:
-        logger.error("❌ WEBHOOK_URL ไม่ถูกต้อง! กรุณาตั้งค่าใน Environment Variables")
-        # กรณีรัน Test ในเครื่อง ให้เปลี่ยนไปใช้ polling ชั่วคราวได้
-        # application.run_polling() 
-        # return
-
     # สร้าง Application
     application = Application.builder().token(BOT_TOKEN).build()
     
@@ -184,19 +186,29 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
     
-    # ดึง Port จาก Render
-    port = int(os.environ.get("PORT", 10000))
-    
-    # รัน Webhook (แทน Polling)
-    # วิธีนี้จะเปิด Web Server เล็กๆ ในตัวเพื่อรับข้อมูลจาก Telegram
-    logger.info(f"🚀 Starting Webhook on port {port}...")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=BOT_TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
-        drop_pending_updates=True
-    )
+    # ตรวจสอบว่าจะใช้ Webhook หรือ Polling
+    if WEBHOOK_URL and "onrender.com" in WEBHOOK_URL:
+        # ใช้ Webhook สำหรับ Production
+        try:
+            port = int(os.environ.get("PORT", 10000))
+            logger.info(f"🚀 Starting Webhook on port {port}...")
+            application.run_webhook(
+                listen="0.0.0.0",
+                port=port,
+                url_path=BOT_TOKEN,
+                webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+                drop_pending_updates=True
+            )
+        except RuntimeError as e:
+            if "webhooks" in str(e):
+                logger.warning("⚠️ Webhook dependencies not installed, falling back to polling...")
+                application.run_polling(drop_pending_updates=True)
+            else:
+                raise
+    else:
+        # ใช้ Polling สำหรับ Development
+        logger.info("🚀 Starting Polling mode...")
+        application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
