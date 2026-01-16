@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # --- Config ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY")
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
+FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")  # เพิ่ม Finnhub สำหรับ Recommendations
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # --- API Functions ---
@@ -111,6 +112,21 @@ def get_bbands(symbol):
     except:
         return None, None
 
+def get_analyst_recommendations(symbol):
+    """ดึงคำแนะนำจากนักวิเคราะห์ (จาก Finnhub)"""
+    try:
+        if not FINNHUB_KEY or FINNHUB_KEY == "":
+            return None
+            
+        url = f"https://finnhub.io/api/v1/stock/recommendation"
+        params = {"symbol": symbol, "token": FINNHUB_KEY}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        return data[0] if data and len(data) > 0 else None
+    except Exception as e:
+        logger.error(f"Error fetching recommendations: {e}")
+        return None
+
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -130,6 +146,7 @@ def get_stock_analysis(symbol):
         ema_50 = get_ema(symbol, 50)
         ema_200 = get_ema(symbol, 200)
         bb_lower, bb_upper = get_bbands(symbol)
+        recommendations = get_analyst_recommendations(symbol)  # เพิ่มบรรทัดนี้
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -210,6 +227,31 @@ def get_stock_analysis(symbol):
             report += f"🛡️ **แนวรับ/แนวต้าน:**\n"
             report += f"• Support: ${bb_lower:.2f}\n"
             report += f"• Resistance: ${bb_upper:.2f}\n\n"
+        
+        # คำแนะนำจากนักวิเคราะห์
+        if recommendations:
+            report += f"🎯 **คำแนะนำจากนักวิเคราะห์:**\n"
+            buy = recommendations.get('buy', 0)
+            hold = recommendations.get('hold', 0)
+            sell = recommendations.get('sell', 0)
+            total = buy + hold + sell
+            
+            if total > 0:
+                buy_pct = (buy / total) * 100
+                sell_pct = (sell / total) * 100
+                
+                report += f"• ซื้อ: {buy} คน ({buy_pct:.0f}%)\n"
+                report += f"• ถือ: {hold} คน\n"
+                report += f"• ขาย: {sell} คน ({sell_pct:.0f}%)\n"
+                
+                if buy_pct >= 60:
+                    report += f"💚 นักวิเคราะห์ส่วนใหญ่แนะนำ 'ซื้อ'\n\n"
+                elif sell_pct >= 40:
+                    report += f"❤️ นักวิเคราะห์หลายคนแนะนำ 'ขาย'\n\n"
+                else:
+                    report += f"⚪ ความเห็นนักวิเคราะห์แบ่งออกเป็น 2 ฝ่าย\n\n"
+            else:
+                report += f"ไม่มีข้อมูล\n\n"
         
         # สรุปภาพรวม
         report += f"📝 **สรุป:**\n"
