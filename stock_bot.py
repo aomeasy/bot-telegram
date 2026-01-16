@@ -34,9 +34,21 @@ def fetch_stock_data(symbol):
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
-        if "Error Message" in data: return None
-        if "Note" in data: return None, "rate_limit"
-        if "Time Series (Daily)" not in data: return None
+        # Debug: แสดง response ที่ได้รับ
+        logger.info(f"API Response keys: {list(data.keys())}")
+        
+        if "Error Message" in data:
+            logger.error(f"API Error: {data.get('Error Message')}")
+            return None
+        if "Note" in data:
+            logger.warning(f"API Limit: {data.get('Note')}")
+            return None, "rate_limit"
+        if "Information" in data:
+            logger.error(f"API Info: {data.get('Information')}")
+            return None, "invalid_key"
+        if "Time Series (Daily)" not in data:
+            logger.error(f"No time series data found. Response: {data}")
+            return None
         
         df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient='index')
         df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
@@ -82,9 +94,12 @@ def calculate_ema(prices, period):
 
 def get_stock_analysis(symbol):
     try:
-        df = fetch_stock_data(symbol)
-        if df is None: return None
-        if isinstance(df, tuple) and df[1] == "rate_limit": return "rate_limit"
+        result = fetch_stock_data(symbol)
+        if result is None: return None
+        if isinstance(result, tuple):
+            if result[1] == "rate_limit": return "rate_limit"
+            if result[1] == "invalid_key": return "invalid_key"
+        df = result
         if len(df) < 50: return None
         
         prices = df['Close']
@@ -166,6 +181,8 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if analysis == "rate_limit":
         await processing.edit_text("⚠️ **API Limit ครบแล้ว** (25 req/วัน) กรุณาลองใหม่พรุ่งนี้", parse_mode='Markdown')
+    elif analysis == "invalid_key":
+        await processing.edit_text("⚠️ **API Key ไม่ถูกต้อง**\nกรุณาตั้งค่า ALPHA_VANTAGE_KEY ใน Environment Variables", parse_mode='Markdown')
     elif analysis:
         await processing.edit_text(analysis, parse_mode='Markdown')
     else:
