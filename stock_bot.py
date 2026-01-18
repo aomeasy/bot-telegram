@@ -4,6 +4,8 @@ import requests
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from flask import Flask
+from threading import Thread
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -14,8 +16,25 @@ logger = logging.getLogger(__name__)
 # --- Config ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY")
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
-FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")  # เพิ่ม Finnhub สำหรับ Recommendations
+FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+# --- Flask Health Check Server ---
+app = Flask(__name__)
+
+@app.route('/')
+@app.route('/health')
+def health():
+    return {'status': 'ok', 'bot': 'running', 'timestamp': datetime.now().isoformat()}, 200
+
+def run_flask():
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+def start_health_server():
+    server = Thread(target=run_flask, daemon=True)
+    server.start()
+    logger.info(f"✅ Health check server started on port {os.environ.get('PORT', 8080)}")
 
 # --- API Functions ---
 
@@ -146,7 +165,7 @@ def get_stock_analysis(symbol):
         ema_50 = get_ema(symbol, 50)
         ema_200 = get_ema(symbol, 200)
         bb_lower, bb_upper = get_bbands(symbol)
-        recommendations = get_analyst_recommendations(symbol)  # เพิ่มบรรทัดนี้
+        recommendations = get_analyst_recommendations(symbol)
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -377,6 +396,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Main ---
 
 def main():
+    # เริ่ม Health Check Server ก่อน
+    start_health_server()
+    
     application = Application.builder().token(BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
