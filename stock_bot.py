@@ -5,7 +5,7 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.ext import CallbackContext
-from aiohttp import web
+# from aiohttp import web
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -364,9 +364,9 @@ def get_stock_analysis(symbol):
         
 # --- HTTP Health Check Handler (สำหรับป้องกัน Render Sleep) ---
 
-async def http_health_check(request):
-    """HTTP health check endpoint for UptimeRobot & Render"""
-    return web.Response(text="✅ Bot is running!", status=200)
+#async def http_health_check(request):
+#    """HTTP health check endpoint for UptimeRobot & Render"""
+#    return web.Response(text="✅ Bot is running!", status=200)
 
 # --- Telegram Handlers ---
 
@@ -493,21 +493,13 @@ def main():
         try:
             port = int(os.environ.get("PORT", 10000))
             logger.info(f"🚀 Starting Webhook on port {port}...")
-            logger.info(f"🌐 Health check endpoint: {WEBHOOK_URL}/health")
             
             application.run_webhook(
                 listen="0.0.0.0",
                 port=port,
                 url_path=BOT_TOKEN,
                 webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
-                drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES,
-                webhook_server_kwargs={
-                    'routes': [
-                        web.get('/health', http_health_check),
-                        web.get('/', http_health_check)
-                    ]
-                }
+                drop_pending_updates=True
             )
         except RuntimeError as e:
             if "webhooks" in str(e):
