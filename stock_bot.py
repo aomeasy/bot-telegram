@@ -128,6 +128,29 @@ def get_analyst_recommendations(symbol):
         logger.error(f"Error fetching recommendations: {e}")
         return None
 
+def get_price_target(symbol):
+    """ดึงราคาเป้าหมายจากนักวิเคราะห์ (จาก Finnhub)"""
+    try:
+        if not FINNHUB_KEY or FINNHUB_KEY == "":
+            return None
+            
+        url = f"https://finnhub.io/api/v1/stock/price-target"
+        params = {"symbol": symbol, "token": FINNHUB_KEY}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data and 'targetMean' in data:
+            return {
+                'target_mean': data.get('targetMean'),
+                'target_high': data.get('targetHigh'),
+                'target_low': data.get('targetLow'),
+                'number_of_analysts': data.get('numberOfAnalysts', 0)
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching price target: {e}")
+        return None
+
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -148,6 +171,7 @@ def get_stock_analysis(symbol):
         ema_200 = get_ema(symbol, 200)
         bb_lower, bb_upper = get_bbands(symbol)
         recommendations = get_analyst_recommendations(symbol)
+        price_target = get_price_target(symbol)
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -175,6 +199,53 @@ def get_stock_analysis(symbol):
         report += f"• สูงสุด: ${high:.2f}\n"
         report += f"• ต่ำสุด: ${low:.2f}\n"
         report += f"• ปิดก่อนหน้า: ${prev_close:.2f}\n\n"
+        
+        # ============ Valuation & Margin of Safety ============
+        if price_target and price_target['target_mean']:
+            report += f"💎 **มูลค่าและความปลอดภัย (Valuation & Margin of Safety):**\n"
+            
+            target_mean = price_target['target_mean']
+            target_high = price_target['target_high']
+            target_low = price_target['target_low']
+            num_analysts = price_target['number_of_analysts']
+            
+            # คำนวณ Upside/Downside Potential
+            upside_pct = ((target_mean - current) / current) * 100
+            
+            report += f"• ราคาเป้าหมายเฉลี่ย: ${target_mean:.2f}\n"
+            
+            if target_high and target_low:
+                report += f"• ช่วงราคาเป้าหมาย: ${target_low:.2f} - ${target_high:.2f}\n"
+            
+            if num_analysts > 0:
+                report += f"• จำนวนนักวิเคราะห์: {num_analysts} คน\n"
+            
+            # แสดง Upside/Downside
+            if upside_pct > 0:
+                report += f"\n🎯 **Upside Potential:** +{upside_pct:.1f}%\n"
+            else:
+                report += f"\n⚠️ **Downside Risk:** {upside_pct:.1f}%\n"
+            
+            # Margin of Safety Analysis
+            report += f"\n📐 **Margin of Safety:**\n"
+            
+            if upside_pct >= 20:
+                report += f"✅ **ดีเยี่ยม** - ราคาต่ำกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
+                report += f"💡 มี Margin of Safety สูง เหมาะสำหรับการลงทุน\n"
+            elif upside_pct >= 10:
+                report += f"👍 **ดี** - ราคาต่ำกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
+                report += f"💡 มี Margin of Safety ปานกลาง ยังน่าสนใจ\n"
+            elif upside_pct >= 0:
+                report += f"⚖️ **ยุติธรรม** - ราคาต่ำกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
+                report += f"💡 Margin of Safety น้อย พิจารณาระมัดระวัง\n"
+            elif upside_pct >= -10:
+                report += f"⚠️ **ระวัง** - ราคาสูงกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
+                report += f"💡 ไม่มี Margin of Safety อาจรอจังหวะที่ดีกว่า\n"
+            else:
+                report += f"🚨 **เสี่ยง** - ราคาสูงกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
+                report += f"💡 ราคาแพงเกินไป ควรระมัดระวังหรือรอปรับฐาน\n"
+            
+            report += f"\n"
         
         # RSI Analysis
         if rsi:
@@ -258,6 +329,20 @@ def get_stock_analysis(symbol):
         report += f"📝 **สรุป:**\n"
         signals = []
         
+        # เพิ่ม Valuation signal
+        if price_target and price_target['target_mean']:
+            target_mean = price_target['target_mean']
+            upside_pct = ((target_mean - current) / current) * 100
+            
+            if upside_pct >= 20:
+                signals.append("Valuation: ราคาถูกมาก ⭐⭐⭐")
+            elif upside_pct >= 10:
+                signals.append("Valuation: ราคาน่าสนใจ ⭐⭐")
+            elif upside_pct >= 0:
+                signals.append("Valuation: ราคายุติธรรม ⭐")
+            else:
+                signals.append("Valuation: ราคาแพง ⚠️")
+        
         if rsi and rsi <= 30:
             signals.append("RSI: ซื้อ")
         elif rsi and rsi >= 70:
@@ -280,8 +365,7 @@ def get_stock_analysis(symbol):
         else:
             report += f"• ไม่มีสัญญาณชัดเจน\n"
         
-        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
-        report += f"\n\n⚠️ *ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน*"
+        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}" 
         
         return report
         
@@ -299,7 +383,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /help - ดูคำแนะนำ
 • /popular - ดูหุ้นยอดนิยม
 
-✨ วิเคราะห์ด้วย RSI, MACD, EMA, Bollinger Bands"""
+✨ วิเคราะห์ด้วย:
+• RSI, MACD, EMA, Bollinger Bands
+• Valuation & Margin of Safety
+• คำแนะนำจากนักวิเคราะห์"""
     await update.message.reply_text(welcome, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,6 +397,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • MACD - Moving Average Convergence Divergence
 • EMA (20, 50, 200) - Exponential Moving Average
 • Bollinger Bands (20) - แนวรับ/แนวต้าน
+• Valuation - ราคาเป้าหมายจากนักวิเคราะห์
+• Margin of Safety - ความปลอดภัยของราคา
 
 **ตัวอย่างการใช้:**
 พิมพ์: AAPL
@@ -353,7 +442,7 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(user_input) < 1 or len(user_input) > 6 or not user_input.isalpha(): 
         return
     
-    processing = await update.message.reply_text(f"🔍 กำลังวิเคราะห์ {user_input}...\n⏳ กำลังดึงข้อมูล RSI, MACD, EMA, Bollinger Bands...")
+    processing = await update.message.reply_text(f"🔍 กำลังวิเคราะห์ {user_input}...\n⏳ กำลังดึงข้อมูล RSI, MACD, EMA, Bollinger Bands, Valuation...")
     analysis = get_stock_analysis(user_input)
     
     if analysis == "no_key":
