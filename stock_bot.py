@@ -177,7 +177,7 @@ def get_stock_analysis(symbol):
         open_price = float(quote.get('open', current))
         
         # สร้างรายงาน
-        report = f"""📊 **{symbol.upper()} Analysis**\n\n"""
+        #report = f"""📊 **{symbol.upper()} Analysis**\n\n"""
         
         if quote.get('name'):
             report += f"🏢 **{quote['name']}**\n\n"
