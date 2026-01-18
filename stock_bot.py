@@ -4,8 +4,7 @@ import requests
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask
-from threading import Thread
+from telegram.ext import CallbackContext
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,23 +17,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGd
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-
-# --- Flask Health Check Server ---
-app = Flask(__name__)
-
-@app.route('/')
-@app.route('/health')
-def health():
-    return {'status': 'ok', 'bot': 'running', 'timestamp': datetime.now().isoformat()}, 200
-
-def run_flask():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-
-def start_health_server():
-    server = Thread(target=run_flask, daemon=True)
-    server.start()
-    logger.info(f"✅ Health check server started on port {os.environ.get('PORT', 8080)}")
 
 # --- API Functions ---
 
@@ -177,7 +159,7 @@ def get_stock_analysis(symbol):
         open_price = float(quote.get('open', current))
         
         # สร้างรายงาน
-        #report = f"""📊 **{symbol.upper()} Analysis**\n\n"""
+        report = f"""📊 **{symbol.upper()} Analysis**\n\n"""
         
         if quote.get('name'):
             report += f"🏢 **{quote['name']}**\n\n"
@@ -298,7 +280,8 @@ def get_stock_analysis(symbol):
         else:
             report += f"• ไม่มีสัญญาณชัดเจน\n"
         
-        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}" 
+        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+        report += f"\n\n⚠️ *ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน*"
         
         return report
         
@@ -389,20 +372,23 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
 
+# Health check handler
+async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /health command"""
+    await update.message.reply_text("✅ Bot is running!")
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
 # --- Main ---
 
 def main():
-    # เริ่ม Health Check Server ก่อน
-    start_health_server()
-    
     application = Application.builder().token(BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("popular", popular_stocks))
+    application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
     
