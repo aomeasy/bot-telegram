@@ -493,15 +493,15 @@ def main():
         try:
             port = int(os.environ.get("PORT", 10000))
             logger.info(f"🚀 Starting Webhook on port {port}...")
-         
-
+            logger.info(f"🌐 Health check endpoint: {WEBHOOK_URL}/health")
+            
             application.run_webhook(
                 listen="0.0.0.0",
                 port=port,
                 url_path=BOT_TOKEN,
                 webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
                 drop_pending_updates=True,
-                # เพิ่มบรรทัดนี้
+                allowed_updates=Update.ALL_TYPES,
                 webhook_server_kwargs={
                     'routes': [
                         web.get('/health', http_health_check),
