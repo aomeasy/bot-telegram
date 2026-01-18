@@ -133,6 +133,7 @@ def get_price_target(symbol):
     """ดึงราคาเป้าหมายจากนักวิเคราะห์ (จาก Finnhub)"""
     try:
         if not FINNHUB_KEY or FINNHUB_KEY == "":
+            logger.warning("⚠️ FINNHUB_KEY not set - Valuation data unavailable")
             return None
             
         url = f"https://finnhub.io/api/v1/stock/price-target"
@@ -140,16 +141,20 @@ def get_price_target(symbol):
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
-        if data and 'targetMean' in data:
+        logger.info(f"📊 Price Target Response for {symbol}: {data}")
+        
+        if data and 'targetMean' in data and data['targetMean']:
             return {
                 'target_mean': data.get('targetMean'),
                 'target_high': data.get('targetHigh'),
                 'target_low': data.get('targetLow'),
                 'number_of_analysts': data.get('numberOfAnalysts', 0)
             }
-        return None
+        else:
+            logger.warning(f"⚠️ No price target data for {symbol}")
+            return None
     except Exception as e:
-        logger.error(f"Error fetching price target: {e}")
+        logger.error(f"❌ Error fetching price target: {e}")
         return None
 
 def get_stock_analysis(symbol):
@@ -202,51 +207,43 @@ def get_stock_analysis(symbol):
         report += f"• ปิดก่อนหน้า: ${prev_close:.2f}\n\n"
         
         # ============ Valuation & Margin of Safety ============
-        if price_target and price_target['target_mean']:
-            report += f"💎 **มูลค่าและความปลอดภัย (Valuation & Margin of Safety):**\n"
+        if price_target and price_target.get('target_mean'):
+            report += f"💎 **Valuation & Margin of Safety:**\n"
             
             target_mean = price_target['target_mean']
-            target_high = price_target['target_high']
-            target_low = price_target['target_low']
-            num_analysts = price_target['number_of_analysts']
+            target_high = price_target.get('target_high')
+            target_low = price_target.get('target_low')
+            num_analysts = price_target.get('number_of_analysts', 0)
             
             # คำนวณ Upside/Downside Potential
             upside_pct = ((target_mean - current) / current) * 100
             
-            report += f"• ราคาเป้าหมายเฉลี่ย: ${target_mean:.2f}\n"
+            report += f"• ราคาเป้าหมาย: ${target_mean:.2f}"
             
             if target_high and target_low:
-                report += f"• ช่วงราคาเป้าหมาย: ${target_low:.2f} - ${target_high:.2f}\n"
+                report += f" (${target_low:.2f}-${target_high:.2f})\n"
+            else:
+                report += f"\n"
             
             if num_analysts > 0:
-                report += f"• จำนวนนักวิเคราะห์: {num_analysts} คน\n"
+                report += f"• นักวิเคราะห์: {num_analysts} คน\n"
             
-            # แสดง Upside/Downside
-            if upside_pct > 0:
-                report += f"\n🎯 **Upside Potential:** +{upside_pct:.1f}%\n"
-            else:
-                report += f"\n⚠️ **Downside Risk:** {upside_pct:.1f}%\n"
-            
-            # Margin of Safety Analysis
-            report += f"\n📐 **Margin of Safety:**\n"
-            
+            # แสดง Upside/Downside พร้อม Margin of Safety
             if upside_pct >= 20:
-                report += f"✅ **ดีเยี่ยม** - ราคาต่ำกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
-                report += f"💡 มี Margin of Safety สูง เหมาะสำหรับการลงทุน\n"
+                report += f"🎯 Upside: +{upside_pct:.1f}% ⭐⭐⭐\n"
+                report += f"✅ ราคาถูกมาก - Margin of Safety สูง\n\n"
             elif upside_pct >= 10:
-                report += f"👍 **ดี** - ราคาต่ำกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
-                report += f"💡 มี Margin of Safety ปานกลาง ยังน่าสนใจ\n"
+                report += f"🎯 Upside: +{upside_pct:.1f}% ⭐⭐\n"
+                report += f"👍 ราคาน่าสนใจ - Margin of Safety ปานกลาง\n\n"
             elif upside_pct >= 0:
-                report += f"⚖️ **ยุติธรรม** - ราคาต่ำกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
-                report += f"💡 Margin of Safety น้อย พิจารณาระมัดระวัง\n"
+                report += f"🎯 Upside: +{upside_pct:.1f}% ⭐\n"
+                report += f"⚖️ ราคายุติธรรม - Margin of Safety น้อย\n\n"
             elif upside_pct >= -10:
-                report += f"⚠️ **ระวัง** - ราคาสูงกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
-                report += f"💡 ไม่มี Margin of Safety อาจรอจังหวะที่ดีกว่า\n"
+                report += f"⚠️ Downside: {upside_pct:.1f}%\n"
+                report += f"🔶 ราคาสูงกว่าเป้า - ไม่มี Margin of Safety\n\n"
             else:
-                report += f"🚨 **เสี่ยง** - ราคาสูงกว่าเป้าหมาย {abs(upside_pct):.1f}%\n"
-                report += f"💡 ราคาแพงเกินไป ควรระมัดระวังหรือรอปรับฐาน\n"
-            
-            report += f"\n"
+                report += f"🚨 Downside: {upside_pct:.1f}%\n"
+                report += f"⛔ ราคาแพงเกินไป - ควรระมัดระวัง\n\n"
         
         # RSI Analysis
         if rsi:
@@ -270,40 +267,33 @@ def get_stock_analysis(symbol):
         
         # EMA Analysis
         if ema_20 and ema_50 and ema_200:
-            report += f"📊 **ราคาเฉลี่ยเคลื่อนที่:**\n"
+            report += f"📊 **EMA:**\n"
             report += f"• EMA 20: ${ema_20:.2f}\n"
             report += f"• EMA 50: ${ema_50:.2f}\n"
             report += f"• EMA 200: ${ema_200:.2f}\n"
             
             if current > ema_20 > ema_50:
-                report += f"📈 Uptrend - เทรนด์ขาขึ้นแข็งแกร่ง\n\n"
+                report += f"📈 Uptrend แข็งแกร่ง\n\n"
             elif current < ema_20 < ema_50:
-                report += f"📉 Downtrend - เทรนด์ขาลง\n\n"
+                report += f"📉 Downtrend\n\n"
             else:
-                report += f"➡️ Sideways - เทรนด์ไม่ชัดเจน\n\n"
+                report += f"➡️ Sideways\n\n"
         
-        # Bollinger Bands
+        # Bollinger Bands (กระชับลง)
         if bb_lower and bb_upper:
-            report += f"🎯 **Bollinger Bands (20):**\n"
-            report += f"• Upper: ${bb_upper:.2f}\n"
-            report += f"• Lower: ${bb_lower:.2f}\n"
-            bb_position = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
-            report += f"• ราคาอยู่ที่: {bb_position:.0f}% ของแบนด์\n"
+            report += f"🎯 **Bollinger Bands:**\n"
+            report += f"• Support: ${bb_lower:.2f}\n"
+            report += f"• Resistance: ${bb_upper:.2f}\n"
             
             if current >= bb_upper:
-                report += f"⚠️ ราคาสูงกว่าแบนด์บน (อาจปรับตัวลง)\n\n"
+                report += f"⚠️ ราคาสูงกว่าแบนด์บน\n\n"
             elif current <= bb_lower:
-                report += f"💡 ราคาต่ำกว่าแบนด์ล่าง (อาจปรับตัวขึ้น)\n\n"
+                report += f"💡 ราคาต่ำกว่าแบนด์ล่าง\n\n"
             else:
                 report += f"\n"
-            
-            report += f"🛡️ **แนวรับ/แนวต้าน:**\n"
-            report += f"• Support: ${bb_lower:.2f}\n"
-            report += f"• Resistance: ${bb_upper:.2f}\n\n"
         
-        # คำแนะนำจากนักวิเคราะห์
+        # คำแนะนำจากนักวิเคราะห์ (กระชับลง)
         if recommendations:
-            report += f"🎯 **คำแนะนำจากนักวิเคราะห์:**\n"
             buy = recommendations.get('buy', 0)
             hold = recommendations.get('hold', 0)
             sell = recommendations.get('sell', 0)
@@ -313,52 +303,49 @@ def get_stock_analysis(symbol):
                 buy_pct = (buy / total) * 100
                 sell_pct = (sell / total) * 100
                 
-                report += f"• ซื้อ: {buy} คน ({buy_pct:.0f}%)\n"
-                report += f"• ถือ: {hold} คน\n"
-                report += f"• ขาย: {sell} คน ({sell_pct:.0f}%)\n"
+                report += f"🎯 **คำแนะนำนักวิเคราะห์:**\n"
+                report += f"• ซื้อ: {buy} ({buy_pct:.0f}%) • ถือ: {hold} • ขาย: {sell} ({sell_pct:.0f}%)\n"
                 
                 if buy_pct >= 60:
-                    report += f"💚 นักวิเคราะห์ส่วนใหญ่แนะนำ 'ซื้อ'\n\n"
+                    report += f"💚 ส่วนใหญ่แนะนำ 'ซื้อ'\n\n"
                 elif sell_pct >= 40:
-                    report += f"❤️ นักวิเคราะห์หลายคนแนะนำ 'ขาย'\n\n"
+                    report += f"❤️ หลายคนแนะนำ 'ขาย'\n\n"
                 else:
-                    report += f"⚪ ความเห็นนักวิเคราะห์แบ่งออกเป็น 2 ฝ่าย\n\n"
-            else:
-                report += f"ไม่มีข้อมูล\n\n"
+                    report += f"⚪ ความเห็นแบ่งออกเป็น 2 ฝ่าย\n\n"
         
         # สรุปภาพรวม
         report += f"📝 **สรุป:**\n"
         signals = []
         
         # เพิ่ม Valuation signal
-        if price_target and price_target['target_mean']:
+        if price_target and price_target.get('target_mean'):
             target_mean = price_target['target_mean']
             upside_pct = ((target_mean - current) / current) * 100
             
             if upside_pct >= 20:
-                signals.append("Valuation: ราคาถูกมาก ⭐⭐⭐")
+                signals.append("💎 Valuation: ราคาถูกมาก ⭐⭐⭐")
             elif upside_pct >= 10:
-                signals.append("Valuation: ราคาน่าสนใจ ⭐⭐")
+                signals.append("💎 Valuation: ราคาน่าสนใจ ⭐⭐")
             elif upside_pct >= 0:
-                signals.append("Valuation: ราคายุติธรรม ⭐")
+                signals.append("💎 Valuation: ราคายุติธรรม ⭐")
             else:
-                signals.append("Valuation: ราคาแพง ⚠️")
+                signals.append("💎 Valuation: ราคาแพง ⚠️")
         
         if rsi and rsi <= 30:
-            signals.append("RSI: ซื้อ")
+            signals.append("📈 RSI: ซื้อ")
         elif rsi and rsi >= 70:
-            signals.append("RSI: ขาย")
+            signals.append("📈 RSI: ขาย")
         
         if macd is not None and macd_signal is not None:
             if macd > macd_signal:
-                signals.append("MACD: Bullish")
+                signals.append("📊 MACD: Bullish")
             else:
-                signals.append("MACD: Bearish")
+                signals.append("📊 MACD: Bearish")
         
         if ema_20 and ema_50 and current > ema_20 > ema_50:
-            signals.append("EMA: Uptrend")
+            signals.append("📈 EMA: Uptrend")
         elif ema_20 and ema_50 and current < ema_20 < ema_50:
-            signals.append("EMA: Downtrend")
+            signals.append("📉 EMA: Downtrend")
         
         if signals:
             for signal in signals:
@@ -366,14 +353,15 @@ def get_stock_analysis(symbol):
         else:
             report += f"• ไม่มีสัญญาณชัดเจน\n"
         
-        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}" 
+        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+        report += f"\n\n⚠️ *ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน*"
         
         return report
         
     except Exception as e:
         logger.error(f"Error analyzing {symbol}: {e}")
         return None
-
+        
 # --- HTTP Health Check Handler (สำหรับป้องกัน Render Sleep) ---
 
 async def http_health_check(request):
@@ -460,7 +448,20 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     elif analysis:
-        await processing.edit_text(analysis, parse_mode='Markdown')
+        # ตรวจสอบความยาวข้อความ (Telegram limit 4096)
+        if len(analysis) > 4000:
+            # แบ่งข้อความออกเป็น 2 ส่วน
+            mid_point = analysis.rfind('\n\n', 0, 2000)
+            if mid_point == -1:
+                mid_point = 2000
+            
+            part1 = analysis[:mid_point]
+            part2 = analysis[mid_point:]
+            
+            await processing.edit_text(part1, parse_mode='Markdown')
+            await update.message.reply_text(part2, parse_mode='Markdown')
+        else:
+            await processing.edit_text(analysis, parse_mode='Markdown')
     else:
         await processing.edit_text(
             f"❌ ไม่พบข้อมูลหุ้น {user_input}\n\n"
@@ -468,9 +469,9 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
 
-# Telegram Health check handler
+# Health check handler
 async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /health command in Telegram"""
+    """Handle /health command"""
     await update.message.reply_text("✅ Bot is running!")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -492,21 +493,19 @@ def main():
         try:
             port = int(os.environ.get("PORT", 10000))
             logger.info(f"🚀 Starting Webhook on port {port}...")
-            logger.info(f"🌐 Health check available at: {WEBHOOK_URL}/health")
-            
-            # เพิ่ม HTTP health check endpoint สำหรับป้องกัน Render Sleep
+         
+
             application.run_webhook(
                 listen="0.0.0.0",
                 port=port,
                 url_path=BOT_TOKEN,
                 webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
                 drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES,
-                # เพิ่ม health check route
+                # เพิ่มบรรทัดนี้
                 webhook_server_kwargs={
                     'routes': [
                         web.get('/health', http_health_check),
-                        web.get('/', http_health_check)  # เพิ่ม root path ด้วย
+                        web.get('/', http_health_check)
                     ]
                 }
             )
