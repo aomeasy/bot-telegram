@@ -353,8 +353,7 @@ def get_stock_analysis(symbol):
         else:
             report += f"• ไม่มีสัญญาณชัดเจน\n"
         
-        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
-        report += f"\n\n⚠️ *ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน*"
+        report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}" 
         
         return report
         
