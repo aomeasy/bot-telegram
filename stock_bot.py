@@ -5,6 +5,7 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.ext import CallbackContext
+from aiohttp import web
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -373,6 +374,12 @@ def get_stock_analysis(symbol):
         logger.error(f"Error analyzing {symbol}: {e}")
         return None
 
+# --- HTTP Health Check Handler (สำหรับป้องกัน Render Sleep) ---
+
+async def http_health_check(request):
+    """HTTP health check endpoint for UptimeRobot & Render"""
+    return web.Response(text="✅ Bot is running!", status=200)
+
 # --- Telegram Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -461,9 +468,9 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
 
-# Health check handler
+# Telegram Health check handler
 async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /health command"""
+    """Handle /health command in Telegram"""
     await update.message.reply_text("✅ Bot is running!")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -485,12 +492,23 @@ def main():
         try:
             port = int(os.environ.get("PORT", 10000))
             logger.info(f"🚀 Starting Webhook on port {port}...")
+            logger.info(f"🌐 Health check available at: {WEBHOOK_URL}/health")
+            
+            # เพิ่ม HTTP health check endpoint สำหรับป้องกัน Render Sleep
             application.run_webhook(
                 listen="0.0.0.0",
                 port=port,
                 url_path=BOT_TOKEN,
                 webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
-                drop_pending_updates=True
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+                # เพิ่ม health check route
+                webhook_server_kwargs={
+                    'routes': [
+                        web.get('/health', http_health_check),
+                        web.get('/', http_health_check)  # เพิ่ม root path ด้วย
+                    ]
+                }
             )
         except RuntimeError as e:
             if "webhooks" in str(e):
