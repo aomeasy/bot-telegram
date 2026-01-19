@@ -1189,37 +1189,70 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await processing.edit_text(report, parse_mode='Markdown')
 
 async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ดูราคา BTC แบบรวดเร็ว พร้อมวิเคราะห์ระยะสั้น - Optimized"""
+    """ดูราคา BTC/THB จาก Bitkub พร้อมวิเคราะห์ระยะสั้น"""
     
-    processing = await update.message.reply_text("🔍 กำลังดึงข้อมูล BTC...")
+    processing = await update.message.reply_text("🔍 กำลังดึงข้อมูล BTC/THB จาก Bitkub...")
     
     try:
-        # เรียก API แค่ครั้งเดียว
-        btc_ticker = get_binance_ticker("BTCUSDT")
+        # ดึงข้อมูลจาก Bitkub API
+        bitkub_url = "https://api.bitkub.com/api/market/ticker"
+        params = {"sym": "THB_BTC"}
         
-        if not btc_ticker:
-            await processing.edit_text(
-                "❌ ไม่สามารถดึงข้อมูล BTC ได้ในขณะนี้\n\n"
-                "กรุณาลองใหม่อีกครั้ง"
-            )
-            return
+        logger.info("🔍 Fetching BTC/THB from Bitkub...")
+        response = requests.get(bitkub_url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
         
-        # ใช้ข้อมูลเดียวกันวิเคราะห์
-        short_term = get_btc_short_term_analysis(btc_ticker)
+        if 'THB_BTC' not in data:
+            raise Exception("No THB_BTC data in response")
         
-        price = btc_ticker['price']
-        change = btc_ticker['price_change_pct']
-        emoji = "🟢" if change >= 0 else "🔴"
+        btc_data = data['THB_BTC']
+        
+        # ดึงข้อมูลที่จำเป็น
+        price_thb = float(btc_data['last'])
+        high_thb = float(btc_data['high24hr'])
+        low_thb = float(btc_data['low24hr'])
+        
+        # คำนวณ % change
+        prev_close = float(btc_data.get('percentChange', 0))
+        change_pct = prev_close
+        
+        # ถ้าไม่มี percentChange ให้คำนวณจาก high/low
+        if change_pct == 0 and high_thb > 0:
+            avg_price = (high_thb + low_thb) / 2
+            change_pct = ((price_thb - avg_price) / avg_price) * 100
+        
+        logger.info(f"✅ Bitkub BTC/THB: ฿{price_thb:,.2f}, Change: {change_pct:+.2f}%")
+        
+        # สร้าง ticker data สำหรับการวิเคราะห์
+        btc_ticker_thb = {
+            'price': price_thb,
+            'high_24h': high_thb,
+            'low_24h': low_thb,
+            'price_change_pct': change_pct
+        }
+        
+        # ใช้ข้อมูล THB วิเคราะห์
+        short_term = get_btc_short_term_analysis(btc_ticker_thb)
+        
+        emoji = "🟢" if change_pct >= 0 else "🔴"
         
         # เวลาที่ดึงข้อมูล
         fetch_time = datetime.now().strftime('%H:%M:%S')
         
-        report = f"🪙 **Bitcoin Quick Analysis**\n\n"
+        report = f"🪙 **Bitcoin/THB Quick Analysis**\n\n"
         
         # ส่วนที่ 1: ข้อมูลราคา
-        report += f"💰 **ราคา:** ${price:,.2f}\n"
-        report += f"{emoji} **24hr:** {change:+.2f}%\n"
-        report += f"📊 **ช่วง:** ${btc_ticker['low_24h']:,.2f} - ${btc_ticker['high_24h']:,.2f}\n\n"
+        report += f"💰 **ราคา:** ฿{price_thb:,.2f}\n"
+        report += f"{emoji} **24hr:** {change_pct:+.2f}%\n"
+        report += f"📊 **ช่วง:** ฿{low_thb:,.2f} - ฿{high_thb:,.2f}\n"
+        
+        # เพิ่มข้อมูล Volume ถ้ามี
+        if 'baseVolume' in btc_data:
+            volume_btc = float(btc_data['baseVolume'])
+            report += f"📈 **Volume:** {volume_btc:.2f} BTC\n"
+        
+        report += f"\n"
         
         # ส่วนที่ 2: การวิเคราะห์ระยะสั้น
         if short_term:
@@ -1233,8 +1266,8 @@ async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Support & Resistance
             report += f"📊 **Levels:**\n"
-            report += f"• Resistance: ${short_term['resistance']:,.2f}\n"
-            report += f"• Support: ${short_term['support']:,.2f}\n"
+            report += f"• Resistance: ฿{short_term['resistance']:,.2f}\n"
+            report += f"• Support: ฿{short_term['support']:,.2f}\n"
             report += f"• ห่างจาก High: {short_term['distance_from_high']:.1f}%\n"
             report += f"• ห่างจาก Low: {short_term['distance_from_low']:.1f}%\n\n"
             
@@ -1247,16 +1280,28 @@ async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Footer
         report += f"⏰ **อัพเดท:** {fetch_time}\n"
-        report += f"🔄 **Source:** CoinCap API\n"
+        report += f"🇹🇭 **Source:** Bitkub Exchange\n"
         report += f"\n💬 พิมพ์ /btc เพื่อดูการวิเคราะห์แบบเต็ม"
         
         await processing.edit_text(report, parse_mode='Markdown')
         
+    except requests.exceptions.Timeout:
+        logger.error("❌ Bitkub API Timeout")
+        await processing.edit_text(
+            "❌ Bitkub API ตอบสนองช้าเกินไป\n\n"
+            "กรุณาลองใหม่อีกครั้ง"
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Bitkub API Error: {e}")
+        await processing.edit_text(
+            "❌ ไม่สามารถเชื่อมต่อ Bitkub ได้\n\n"
+            "กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"
+        )
     except Exception as e:
         logger.error(f"❌ Error in btc_price: {e}")
         await processing.edit_text(
             "❌ เกิดข้อผิดพลาดในการดึงข้อมูล\n\n"
-            "กรุณาลองใหม่อีกครั้ง"
+            f"รายละเอียด: {str(e)}"
         )
 
 # Health check handler
