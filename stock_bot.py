@@ -431,6 +431,113 @@ def get_btc_technical_signals():
         logger.error(f"❌ Error analyzing BTC signals: {e}")
         return None
 
+
+def get_btc_short_term_analysis(btc_ticker_data):
+    """วิเคราะห์การซื้อ-ขายระยะสั้นสำหรับ BTC - รับข้อมูลจากภายนอก"""
+    try:
+        if not btc_ticker_data:
+            logger.error("❌ No BTC data provided for short-term analysis")
+            return None
+        
+        current_price = btc_ticker_data['price']
+        high_24h = btc_ticker_data['high_24h']
+        low_24h = btc_ticker_data['low_24h']
+        change_pct = btc_ticker_data['price_change_pct']
+        
+        # คำนวณ Support และ Resistance
+        support_level = low_24h
+        resistance_level = high_24h
+        mid_level = (high_24h + low_24h) / 2
+        
+        # คำนวณ Distance from High/Low
+        distance_from_high = ((high_24h - current_price) / high_24h) * 100
+        distance_from_low = ((current_price - low_24h) / low_24h) * 100
+        
+        # วิเคราะห์สัญญาณ
+        signals = []
+        score = 0
+        
+        # 1. ตำแหน่งราคาในช่วง 24hr
+        if current_price <= low_24h * 1.02:  # ใกล้ Low
+            signals.append("🟢 ราคาใกล้จุดต่ำสุด 24hr - โอกาสเข้าซื้อ")
+            score += 30
+        elif current_price >= high_24h * 0.98:  # ใกล้ High
+            signals.append("🔴 ราคาใกล้จุดสูงสุด 24hr - ระวังการปรับฐาน")
+            score -= 30
+        elif current_price <= mid_level:
+            signals.append("🟡 ราคาต่ำกว่ากลางช่วง - พิจารณาเข้าซื้อ")
+            score += 15
+        else:
+            signals.append("🟠 ราคาสูงกว่ากลางช่วง - รอ pullback")
+            score -= 15
+        
+        # 2. Momentum (การเปลี่ยนแปลง 24hr)
+        if change_pct <= -5:
+            signals.append(f"💚 ราคาร่วงแรง {change_pct:.1f}% - โอกาสซื้อ Dip")
+            score += 25
+        elif change_pct <= -3:
+            signals.append(f"🟢 ราคาลดลง {change_pct:.1f}% - เริ่มน่าสนใจ")
+            score += 15
+        elif change_pct >= 5:
+            signals.append(f"🔴 ราคาพุ่งแรง {change_pct:+.1f}% - ควร Take Profit")
+            score -= 25
+        elif change_pct >= 3:
+            signals.append(f"🟠 ราคาขึ้นแรง {change_pct:+.1f}% - ระวังกลับตัว")
+            score -= 15
+        
+        # 3. Volatility (ความผันผวน)
+        price_range = high_24h - low_24h
+        volatility_pct = (price_range / low_24h) * 100
+        
+        if volatility_pct >= 5:
+            signals.append(f"⚡ ความผันผวนสูง {volatility_pct:.1f}% - เหมาะเทรดระยะสั้น")
+        elif volatility_pct >= 3:
+            signals.append(f"📊 ความผันผวนปานกลาง {volatility_pct:.1f}% - ตลาดปกติ")
+        else:
+            signals.append(f"😴 ความผันผวนต่ำ {volatility_pct:.1f}% - รอโมเมนตัม")
+        
+        # สรุปคำแนะนำ
+        if score >= 40:
+            action = "🟢 STRONG BUY"
+            entry = f"เข้าซื้อที่: ${current_price:,.2f}"
+            target = f"Target: ${resistance_level:,.2f} (+{((resistance_level-current_price)/current_price*100):.1f}%)"
+            stop_loss = f"Stop Loss: ${support_level:,.2f} (-{((current_price-support_level)/current_price*100):.1f}%)"
+        elif score >= 20:
+            action = "🟢 BUY"
+            entry = f"เข้าซื้อที่: ${current_price:,.2f} หรือรอ pullback"
+            target = f"Target: ${mid_level:,.2f} - ${resistance_level:,.2f}"
+            stop_loss = f"Stop Loss: ${support_level:,.2f}"
+        elif score >= -20:
+            action = "🟡 WAIT"
+            entry = f"รอสัญญาณชัดเจน"
+            target = f"Entry: ใกล้ ${support_level:,.2f}"
+            stop_loss = f"หรือใกล้ ${low_24h * 0.98:,.2f}"
+        else:
+            action = "🔴 SELL/TAKE PROFIT"
+            entry = f"ออกจากตำแหน่งที่: ${current_price:,.2f}"
+            target = f"Re-entry: ${support_level:,.2f} - ${mid_level:,.2f}"
+            stop_loss = f"Stop: ${high_24h * 1.02:,.2f}"
+        
+        logger.info(f"✅ Short-term analysis complete. Score: {score}")
+        
+        return {
+            'signals': signals,
+            'score': score,
+            'action': action,
+            'entry': entry,
+            'target': target,
+            'stop_loss': stop_loss,
+            'support': support_level,
+            'resistance': resistance_level,
+            'current_price': current_price,
+            'distance_from_high': distance_from_high,
+            'distance_from_low': distance_from_low
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in short-term analysis: {e}")
+        return None
+
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -1081,36 +1188,76 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await processing.edit_text(report, parse_mode='Markdown')
 
-
 async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ดูราคา BTC แบบรวดเร็ว - ปรับปรุงแล้ว"""
+    """ดูราคา BTC แบบรวดเร็ว พร้อมวิเคราะห์ระยะสั้น - Optimized"""
     
-    # ลอง CoinCap ก่อน (เร็วกว่า)
-    btc_ticker = get_binance_ticker("BTCUSDT")
-    btc_data = get_btc_data()
+    processing = await update.message.reply_text("🔍 กำลังดึงข้อมูล BTC...")
     
-    if btc_ticker:
+    try:
+        # เรียก API แค่ครั้งเดียว
+        btc_ticker = get_binance_ticker("BTCUSDT")
+        
+        if not btc_ticker:
+            await processing.edit_text(
+                "❌ ไม่สามารถดึงข้อมูล BTC ได้ในขณะนี้\n\n"
+                "กรุณาลองใหม่อีกครั้ง"
+            )
+            return
+        
+        # ใช้ข้อมูลเดียวกันวิเคราะห์
+        short_term = get_btc_short_term_analysis(btc_ticker)
+        
         price = btc_ticker['price']
         change = btc_ticker['price_change_pct']
         emoji = "🟢" if change >= 0 else "🔴"
         
-        report = f"🪙 **Bitcoin** (CoinCap)\n\n"
-        report += f"💰 ${price:,.2f}\n"
-        report += f"{emoji} {change:+.2f}% (24hr)\n"
-        report += f"📊 H: ${btc_ticker['high_24h']:,.2f} | L: ${btc_ticker['low_24h']:,.2f}\n"
+        # เวลาที่ดึงข้อมูล
+        fetch_time = datetime.now().strftime('%H:%M:%S')
         
-        if btc_data and btc_data.get('market_cap'):
-            report += f"💎 MCap: ${btc_data['market_cap']/1e9:.1f}B\n"
+        report = f"🪙 **Bitcoin Quick Analysis**\n\n"
         
-        report += f"\n💬 พิมพ์ /btc เพื่อดูรายละเอียดเพิ่มเติม"
+        # ส่วนที่ 1: ข้อมูลราคา
+        report += f"💰 **ราคา:** ${price:,.2f}\n"
+        report += f"{emoji} **24hr:** {change:+.2f}%\n"
+        report += f"📊 **ช่วง:** ${btc_ticker['low_24h']:,.2f} - ${btc_ticker['high_24h']:,.2f}\n\n"
         
-        await update.message.reply_text(report, parse_mode='Markdown')
-    else:
-        await update.message.reply_text(
-            "❌ ไม่สามารถดึงข้อมูล BTC ได้ในขณะนี้\n\n"
-            "กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ"
+        # ส่วนที่ 2: การวิเคราะห์ระยะสั้น
+        if short_term:
+            report += f"📈 **Short-Term Analysis:**\n\n"
+            
+            # คำแนะนำหลัก
+            report += f"{short_term['action']}\n"
+            report += f"🎯 {short_term['entry']}\n"
+            report += f"🏁 {short_term['target']}\n"
+            report += f"🛑 {short_term['stop_loss']}\n\n"
+            
+            # Support & Resistance
+            report += f"📊 **Levels:**\n"
+            report += f"• Resistance: ${short_term['resistance']:,.2f}\n"
+            report += f"• Support: ${short_term['support']:,.2f}\n"
+            report += f"• ห่างจาก High: {short_term['distance_from_high']:.1f}%\n"
+            report += f"• ห่างจาก Low: {short_term['distance_from_low']:.1f}%\n\n"
+            
+            # สัญญาณ
+            report += f"🔔 **สัญญาณ:**\n"
+            for signal in short_term['signals'][:3]:  # แสดงแค่ 3 สัญญาณแรก
+                report += f"• {signal}\n"
+            
+            report += f"\n"
+        
+        # Footer
+        report += f"⏰ **อัพเดท:** {fetch_time}\n"
+        report += f"🔄 **Source:** CoinCap API\n"
+        report += f"\n💬 พิมพ์ /btc เพื่อดูการวิเคราะห์แบบเต็ม"
+        
+        await processing.edit_text(report, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"❌ Error in btc_price: {e}")
+        await processing.edit_text(
+            "❌ เกิดข้อผิดพลาดในการดึงข้อมูล\n\n"
+            "กรุณาลองใหม่อีกครั้ง"
         )
-
 
 # Health check handler
 async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
