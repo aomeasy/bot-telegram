@@ -21,6 +21,16 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # --- API Functions ---
 
+def quick_api_call(url, params=None, timeout=3):
+    """เรียก API แบบรวดเร็ว พร้อม timeout สั้น"""
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except:
+        return None
+        
 def get_quote(symbol):
     """ดึงราคาปัจจุบัน"""
     try:
@@ -1060,133 +1070,243 @@ async def quick_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await processing.edit_text(report, parse_mode='Markdown')
 
-
 async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ระบบแจ้งเตือน BTC แบบครบวงจร - ปรับปรุงแล้ว"""
+    """ระบบแจ้งเตือน BTC แบบครบวงจร - ใช้ Bitkub"""
     processing = await update.message.reply_text(
         "🔍 กำลังวิเคราะห์ Bitcoin...\n"
-        "⏳ กำลังดึงข้อมูลจาก CoinCap API..."
+        "⏳ กำลังดึงข้อมูลจาก Bitkub..."
     )
     
-    # ดึงข้อมูลทั้งหมด
-    btc_ticker = get_binance_ticker("BTCUSDT")
-    btc_data = get_btc_data()
-    fear_greed = get_fear_greed_index()
-    technical = get_btc_technical_signals()
-    
-    # ตรวจสอบว่ามีข้อมูลพื้นฐานหรือไม่
-    if not btc_ticker and not btc_data:
+    try:
+        # ดึงข้อมูลจาก Bitkub (เร็วที่สุด)
+        bitkub_url = "https://api.bitkub.com/api/market/ticker"
+        params = {"sym": "THB_BTC"}
+        
+        logger.info("🔍 Fetching BTC/THB from Bitkub...")
+        response = requests.get(bitkub_url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'THB_BTC' not in data:
+            raise Exception("No THB_BTC data")
+        
+        btc_data = data['THB_BTC']
+        
+        price_thb = float(btc_data['last'])
+        high_thb = float(btc_data['high24hr'])
+        low_thb = float(btc_data['low24hr'])
+        change_pct = float(btc_data.get('percentChange', 0))
+        
+        # ถ้า percentChange = 0 ให้คำนวณเอง
+        if change_pct == 0 and high_thb > 0:
+            avg_price = (high_thb + low_thb) / 2
+            change_pct = ((price_thb - avg_price) / avg_price) * 100
+        
+        volume_btc = float(btc_data.get('baseVolume', 0))
+        
+        logger.info(f"✅ Bitkub Data: ฿{price_thb:,.2f}, Change: {change_pct:+.2f}%")
+        
+        # สร้าง ticker สำหรับวิเคราะห์
+        btc_ticker = {
+            'price': price_thb,
+            'high_24h': high_thb,
+            'low_24h': low_thb,
+            'price_change_pct': change_pct
+        }
+        
+        # ดึง Fear & Greed (ถ้าเร็ว ไม่เกิน 3 วินาที)
+        fear_greed = None
+        try:
+            fg_response = requests.get(
+                "https://api.alternative.me/fng/",
+                params={"limit": 1},
+                timeout=3
+            )
+            if fg_response.status_code == 200:
+                fg_data = fg_response.json()
+                if fg_data.get('data') and len(fg_data['data']) > 0:
+                    fear_greed = {
+                        'value': int(fg_data['data'][0]['value']),
+                        'classification': fg_data['data'][0]['value_classification']
+                    }
+                    logger.info(f"✅ Fear & Greed: {fear_greed['value']}")
+        except:
+            logger.warning("⚠️ Fear & Greed timeout - skipping")
+        
+        # วิเคราะห์สัญญาณ (ใช้ข้อมูลที่มี ไม่เรียก API เพิ่ม)
+        technical = analyze_btc_simple(btc_ticker)
+        
+        # สร้างรายงาน
+        report = "🪙 **Bitcoin Analysis Report**\n\n"
+        
+        # ส่วนที่ 1: ราคา
+        emoji = "🟢" if change_pct >= 0 else "🔴"
+        report += f"💰 **ราคาปัจจุบัน:** ฿{price_thb:,.2f}\n"
+        report += f"{emoji} **24hr Change:** {change_pct:+.2f}%\n"
+        
+        if volume_btc > 0:
+            report += f"📊 **Volume 24hr:** {volume_btc:,.2f} BTC\n"
+        
+        report += "\n"
+        
+        # ส่วนที่ 2: ช่วงราคา
+        report += f"📊 **ช่วงราคา 24hr:**\n"
+        report += f"• สูงสุด: ฿{high_thb:,.2f}\n"
+        report += f"• ต่ำสุด: ฿{low_thb:,.2f}\n\n"
+        
+        # ส่วนที่ 3: Fear & Greed
+        if fear_greed:
+            fg_value = fear_greed['value']
+            fg_class = fear_greed['classification']
+            
+            report += f"🎭 **Fear & Greed Index:**\n"
+            
+            if fg_value <= 20:
+                report += f"🟢 {fg_value} - {fg_class}\n"
+                report += f"💡 **Extreme Fear** - เวลาที่ดีในการซื้อ!\n\n"
+            elif fg_value <= 40:
+                report += f"🟡 {fg_value} - {fg_class}\n"
+                report += f"💡 ตลาดกลัว - พิจารณาซื้อเพิ่ม\n\n"
+            elif fg_value <= 60:
+                report += f"⚪ {fg_value} - {fg_class}\n"
+                report += f"💡 ตลาดปกติ - รอสัญญาณชัดเจน\n\n"
+            elif fg_value <= 80:
+                report += f"🟠 {fg_value} - {fg_class}\n"
+                report += f"⚠️ ตลาดโลภ - ระวังราคาปรับฐาน\n\n"
+            else:
+                report += f"🔴 {fg_value} - {fg_class}\n"
+                report += f"⚠️ **Extreme Greed** - ควรระมัดระวัง!\n\n"
+        
+        # ส่วนที่ 4: สัญญาณทางเทคนิค
+        if technical:
+            report += f"📈 **สัญญาณทางเทคนิค:**\n"
+            for signal in technical['signals']:
+                report += f"• {signal}\n"
+            report += f"\n"
+            
+            # สรุปคะแนน
+            score = technical['score']
+            report += f"🎯 **คะแนนรวม:** {score}/100\n"
+            
+            if score >= 50:
+                report += f"🟢 **คำแนะนำ: STRONG BUY**\n"
+                report += f"💡 มีสัญญาณ Bullish หลายตัว\n\n"
+            elif score >= 20:
+                report += f"🟢 **คำแนะนำ: ACCUMULATE**\n"
+                report += f"💡 มีสัญญาณเชิงบวก - ซื้อค่อยๆ เพิ่ม\n\n"
+            elif score >= -20:
+                report += f"🟡 **คำแนะนำ: HOLD**\n"
+                report += f"💡 สัญญาณไม่ชัดเจน - รอดูก่อน\n\n"
+            elif score >= -50:
+                report += f"🔴 **คำแนะนำ: REDUCE**\n"
+                report += f"⚠️ มีสัญญาณ Bearish\n\n"
+            else:
+                report += f"🔴 **คำแนะนำ: SELL**\n"
+                report += f"⚠️ สัญญาณ Bearish แข็งแกร่ง\n\n"
+        
+        # ส่วนที่ 5: แจ้งเตือนพิเศษ
+        alerts = []
+        
+        if abs(change_pct) >= 5:
+            alerts.append(f"⚡ ราคาเคลื่อนไหวมาก {abs(change_pct):.1f}%")
+        
+        if fear_greed and (fear_greed['value'] <= 20 or fear_greed['value'] >= 80):
+            alerts.append(f"🎭 Fear & Greed ที่ระดับ Extreme")
+        
+        if alerts:
+            report += f"🔔 **Alert พิเศษ:**\n"
+            for alert in alerts:
+                report += f"• {alert}\n"
+            report += f"\n"
+        
+        # Footer
+        report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}\n"
+        report += f"🇹🇭 Data: Bitkub Exchange\n"
+        report += f"💬 พิมพ์ /b เพื่อดูราคาอย่างรวดเร็ว"
+        
+        await processing.edit_text(report, parse_mode='Markdown')
+        
+    except requests.exceptions.Timeout:
+        logger.error("❌ Bitkub API Timeout")
+        await processing.edit_text(
+            "❌ การเชื่อมต่อหมดเวลา\n\n"
+            "กรุณาลองใหม่อีกครั้ง"
+        )
+    except Exception as e:
+        logger.error(f"❌ Error in btc_alert: {e}")
         await processing.edit_text(
             "❌ ไม่สามารถดึงข้อมูล Bitcoin ได้\n\n"
-            "**สาเหตุที่เป็นไปได้:**\n"
-            "• เซิร์ฟเวอร์ไม่สามารถเชื่อมต่อ CoinCap API\n"
-            "• เซิร์ฟเวอร์ไม่สามารถเชื่อมต่อ CoinGecko API\n"
-            "• ปัญหา Network ของ Render\n\n"
-            "**แนะนำ:**\n"
-            "• ลองใหม่อีกครั้งในอีก 1-2 นาที\n"
-            "• ติดต่อผู้ดูแลระบบถ้ายังใช้งานไม่ได้"
+            f"กรุณาลองใหม่อีกครั้ง"
         )
-        return
-    
-    # ใช้ข้อมูลจากแหล่งที่มี
-    data_source = btc_ticker if btc_ticker else btc_data
-    
-    # สร้างรายงาน
-    report = "🪙 **Bitcoin Analysis Report**\n\n"
-    
-    # ส่วนที่ 1: ราคาและข้อมูลพื้นฐาน
-    price = data_source['price']
-    change_24h = data_source['change_24h']
-    emoji = "🟢" if change_24h >= 0 else "🔴"
-    
-    report += f"💰 **ราคาปัจจุบัน:** ${price:,.2f}\n"
-    report += f"{emoji} **24hr Change:** {change_24h:+.2f}%\n"
-    
-    if btc_ticker:
-        report += f"📊 **Volume 24hr:** {btc_ticker['volume']:,.0f} BTC\n"
-    
-    if btc_data and btc_data.get('market_cap'):
-        report += f"📈 **Market Cap:** ${btc_data['market_cap']/1e9:.2f}B\n"
-    
-    report += "\n"
-    
-    # ส่วนที่ 2: ช่วงราคา 24hr
-    if btc_ticker:
-        report += f"📊 **ช่วงราคา 24hr:**\n"
-        report += f"• สูงสุด: ${btc_ticker['high_24h']:,.2f}\n"
-        report += f"• ต่ำสุด: ${btc_ticker['low_24h']:,.2f}\n\n"
-    
-    # ส่วนที่ 3: Fear & Greed Index
-    if fear_greed:
-        fg_value = fear_greed['value']
-        fg_class = fear_greed['classification']
+
+
+def analyze_btc_simple(btc_ticker):
+    """วิเคราะห์ BTC แบบง่าย ไม่เรียก API เพิ่ม"""
+    try:
+        current_price = btc_ticker['price']
+        high_24h = btc_ticker['high_24h']
+        low_24h = btc_ticker['low_24h']
+        change_pct = btc_ticker['price_change_pct']
         
-        report += f"🎭 **Fear & Greed Index:**\n"
+        signals = []
+        score = 0
         
-        if fg_value <= 20:
-            report += f"🟢 {fg_value} - {fg_class}\n"
-            report += f"💡 **Extreme Fear** - เวลาที่ดีในการซื้อ!\n\n"
-        elif fg_value <= 40:
-            report += f"🟡 {fg_value} - {fg_class}\n"
-            report += f"💡 ตลาดกลัว - พิจารณาซื้อเพิ่ม\n\n"
-        elif fg_value <= 60:
-            report += f"⚪ {fg_value} - {fg_class}\n"
-            report += f"💡 ตลาดปกติ - รอสัญญาณชัดเจน\n\n"
-        elif fg_value <= 80:
-            report += f"🟠 {fg_value} - {fg_class}\n"
-            report += f"⚠️ ตลาดโลภ - ระวังราคาปรับฐาน\n\n"
+        # 1. ตำแหน่งราคา
+        price_position = (current_price - low_24h) / (high_24h - low_24h) * 100
+        
+        if price_position <= 20:
+            signals.append("🟢 ราคาใกล้จุดต่ำสุด 24hr - โอกาสเข้าซื้อ")
+            score += 30
+        elif price_position <= 40:
+            signals.append("🟡 ราคาค่อนข้างต่ำ - เริ่มน่าสนใจ")
+            score += 15
+        elif price_position >= 80:
+            signals.append("🔴 ราคาใกล้จุดสูงสุด 24hr - ระวังการปรับฐาน")
+            score -= 30
+        elif price_position >= 60:
+            signals.append("🟠 ราคาค่อนข้างสูง - รอ pullback")
+            score -= 15
         else:
-            report += f"🔴 {fg_value} - {fg_class}\n"
-            report += f"⚠️ **Extreme Greed** - ควรระมัดระวัง!\n\n"
-    
-    # ส่วนที่ 4: สัญญาณทางเทคนิค
-    if technical and technical.get('signals'):
-        report += f"📈 **สัญญาณทางเทคนิค:**\n"
-        for signal in technical['signals']:
-            report += f"• {signal}\n"
-        report += f"\n"
+            signals.append("➡️ ราคาอยู่กลางช่วง - Neutral")
         
-        # สรุปคะแนน
-        score = technical['score']
-        report += f"🎯 **คะแนนรวม:** {score}/100\n"
-        
-        if score >= 50:
-            report += f"🟢 **คำแนะนำ: STRONG BUY**\n"
-            report += f"💡 มีสัญญาณ Bullish หลายตัว\n\n"
-        elif score >= 20:
-            report += f"🟢 **คำแนะนำ: ACCUMULATE**\n"
-            report += f"💡 มีสัญญาณเชิงบวก - ซื้อค่อยๆ เพิ่ม\n\n"
-        elif score >= -20:
-            report += f"🟡 **คำแนะนำ: HOLD**\n"
-            report += f"💡 สัญญาณไม่ชัดเจน - รอดูก่อน\n\n"
-        elif score >= -50:
-            report += f"🔴 **คำแนะนำ: REDUCE**\n"
-            report += f"⚠️ มีสัญญาณ Bearish\n\n"
+        # 2. Momentum
+        if change_pct <= -5:
+            signals.append(f"💚 ราคาร่วงแรง {change_pct:.1f}% - โอกาสซื้อ Dip")
+            score += 25
+        elif change_pct <= -3:
+            signals.append(f"🟢 ราคาลดลง {change_pct:.1f}% - เริ่มน่าสนใจ")
+            score += 15
+        elif change_pct >= 5:
+            signals.append(f"🔴 ราคาพุ่งแรง {change_pct:+.1f}% - ควร Take Profit")
+            score -= 25
+        elif change_pct >= 3:
+            signals.append(f"🟠 ราคาขึ้นแรง {change_pct:+.1f}% - ระวังกลับตัว")
+            score -= 15
         else:
-            report += f"🔴 **คำแนะนำ: SELL**\n"
-            report += f"⚠️ สัญญาณ Bearish แข็งแกร่ง\n\n"
-    
-    # ส่วนที่ 5: แจ้งเตือนพิเศษ
-    alerts = []
-    
-    if abs(change_24h) >= 5:
-        alerts.append(f"⚡ ราคาเคลื่อนไหวมาก {abs(change_24h):.1f}%")
-    
-    if fear_greed and (fear_greed['value'] <= 20 or fear_greed['value'] >= 80):
-        alerts.append(f"🎭 Fear & Greed ที่ระดับ Extreme")
-    
-    if alerts:
-        report += f"🔔 **Alert พิเศษ:**\n"
-        for alert in alerts:
-            report += f"• {alert}\n"
-        report += f"\n"
-    
-    # Footer
-    report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}\n"
-    report += f"🔄 Data: CoinCap API\n"
-    report += f"💬 พิมพ์ /b เพื่อดูราคาอย่างรวดเร็ว"
-    
-    await processing.edit_text(report, parse_mode='Markdown')
+            signals.append(f"➡️ ราคาเปลี่ยน {change_pct:+.1f}% ใน 24hr")
+        
+        # 3. Volatility
+        price_range = high_24h - low_24h
+        volatility_pct = (price_range / low_24h) * 100
+        
+        if volatility_pct >= 5:
+            signals.append(f"⚡ ความผันผวนสูง {volatility_pct:.1f}% - เหมาะเทรดระยะสั้น")
+        elif volatility_pct >= 3:
+            signals.append(f"📊 ความผันผวนปานกลาง {volatility_pct:.1f}% - ตลาดปกติ")
+        else:
+            signals.append(f"😴 ความผันผวนต่ำ {volatility_pct:.1f}% - รอโมเมนตัม")
+        
+        logger.info(f"✅ Simple analysis complete. Score: {score}")
+        
+        return {
+            'signals': signals,
+            'score': score,
+            'current_price': current_price
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in simple analysis: {e}")
+        return None
 
 async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ดูราคา BTC/THB จาก Bitkub พร้อมวิเคราะห์ระยะสั้น"""
