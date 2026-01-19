@@ -157,6 +157,155 @@ def get_price_target(symbol):
         logger.error(f"❌ Error fetching price target: {e}")
         return None
 
+def get_btc_data():
+    """ดึงข้อมูล BTC จาก CoinGecko (Free API)"""
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {
+            "ids": "bitcoin",
+            "vs_currencies": "usd",
+            "include_24hr_change": "true",
+            "include_24hr_vol": "true",
+            "include_market_cap": "true"
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if 'bitcoin' in data:
+            return {
+                'price': data['bitcoin']['usd'],
+                'change_24h': data['bitcoin']['usd_24h_change'],
+                'volume_24h': data['bitcoin']['usd_24h_vol'],
+                'market_cap': data['bitcoin']['usd_market_cap']
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching BTC data: {e}")
+        return None
+
+def get_binance_ticker(symbol="BTCUSDT"):
+    """ดึงข้อมูล Real-time จาก Binance (Free, No API Key)"""
+    try:
+        url = "https://api.binance.com/api/v3/ticker/24hr"
+        params = {"symbol": symbol}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        return {
+            'price': float(data['lastPrice']),
+            'high_24h': float(data['highPrice']),
+            'low_24h': float(data['lowPrice']),
+            'volume': float(data['volume']),
+            'price_change_pct': float(data['priceChangePercent']),
+            'trades': int(data['count'])
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Binance data: {e}")
+        return None
+
+def get_fear_greed_index():
+    """ดึง Fear & Greed Index (Free API)"""
+    try:
+        url = "https://api.alternative.me/fng/"
+        params = {"limit": 1}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data['data']:
+            value = int(data['data'][0]['value'])
+            classification = data['data'][0]['value_classification']
+            return {'value': value, 'classification': classification}
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching Fear & Greed: {e}")
+        return None
+
+def get_btc_technical_signals():
+    """วิเคราะห์สัญญาณทางเทคนิคของ BTC"""
+    try:
+        # ใช้ Binance data หรือ Twelve Data
+        binance_data = get_binance_ticker("BTCUSDT")
+        if not binance_data:
+            return None
+        
+        # ดึง Technical Indicators (ถ้ามี Twelve Data Key)
+        if TWELVE_DATA_KEY:
+            rsi = get_rsi("BTC/USD")
+            macd, macd_signal = get_macd("BTC/USD")
+            ema_20 = get_ema("BTC/USD", 20)
+            ema_50 = get_ema("BTC/USD", 50)
+        else:
+            rsi = None
+            macd = None
+            macd_signal = None
+            ema_20 = None
+            ema_50 = None
+        
+        current_price = binance_data['price']
+        
+        signals = []
+        score = 0
+        
+        # RSI Analysis
+        if rsi:
+            if rsi <= 30:
+                signals.append(f"📈 RSI: {rsi:.1f} - OVERSOLD (ซื้อ)")
+                score += 30
+            elif rsi >= 70:
+                signals.append(f"📉 RSI: {rsi:.1f} - OVERBOUGHT (ขาย)")
+                score -= 30
+            elif rsi <= 40:
+                signals.append(f"💚 RSI: {rsi:.1f} - ต่ำ (เริ่มน่าสนใจ)")
+                score += 15
+            elif rsi >= 60:
+                signals.append(f"🔶 RSI: {rsi:.1f} - สูง (ระวัง)")
+                score -= 15
+            else:
+                signals.append(f"➡️ RSI: {rsi:.1f} - Neutral")
+        
+        # MACD Analysis
+        if macd is not None and macd_signal is not None:
+            if macd > macd_signal:
+                signals.append("📊 MACD: Golden Cross (Bullish)")
+                score += 25
+            else:
+                signals.append("📊 MACD: Death Cross (Bearish)")
+                score -= 25
+        
+        # EMA Trend
+        if ema_20 and ema_50 and current_price:
+            if current_price > ema_20 > ema_50:
+                signals.append("📈 EMA: Strong Uptrend")
+                score += 20
+            elif current_price < ema_20 < ema_50:
+                signals.append("📉 EMA: Strong Downtrend")
+                score -= 20
+            else:
+                signals.append("➡️ EMA: Sideways")
+        
+        # 24hr Price Movement
+        price_change = binance_data['price_change_pct']
+        if price_change >= 5:
+            signals.append(f"🚀 ราคาพุ่ง +{price_change:.1f}% ใน 24hr")
+            score += 15
+        elif price_change <= -5:
+            signals.append(f"📉 ราคาร่วง {price_change:.1f}% ใน 24hr")
+            score -= 15
+        
+        return {
+            'signals': signals,
+            'score': score,
+            'rsi': rsi,
+            'macd': macd,
+            'macd_signal': macd_signal,
+            'current_price': current_price
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing BTC signals: {e}")
+        return None
+
+
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -484,6 +633,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /help - ดูคำแนะนำ
 • /popular - ดูหุ้นยอดนิยม
 • /a - คำสั่งด่วน
+• /btc - วิเคราะห์ BTC แบบละเอียด 🪙
+• /b - ดูราคา BTC แบบรวดเร็ว ⚡
 • /health - สถานะbot 
 
 ✨ วิเคราะห์ด้วย:
@@ -510,6 +661,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **คำสั่ง:**
 /popular - ดูหุ้นยอดนิยม
+
+**คำสั่ง Crypto:**
+/btc - วิเคราะห์ Bitcoin แบบครบวงจร
+/b หรือ /btcprice - ดูราคา BTC แบบรวดเร็ว
+
+**ข้อมูลที่ได้:**
+• ราคา Real-time จาก Binance
+• Fear & Greed Index
+• สัญญาณทางเทคนิค (RSI, MACD, EMA)
+• คำแนะนำซื้อ-ขาย
 
 ⚠️ รองรับหุ้นอเมริกา และบางหุ้นนานาชาติ
 ⚠️ ข้อมูลเพื่อการศึกษาเท่านั้น"""
@@ -668,6 +829,140 @@ async def quick_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await processing.edit_text(report, parse_mode='Markdown')
 
 
+async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ระบบแจ้งเตือน BTC แบบครบวงจร"""
+    processing = await update.message.reply_text("🔍 กำลังวิเคราะห์ BTC...\n⏳ กำลังดึงข้อมูล...")
+    
+    # ดึงข้อมูลทั้งหมด
+    btc_data = get_btc_data()
+    binance_data = get_binance_ticker("BTCUSDT")
+    fear_greed = get_fear_greed_index()
+    technical = get_btc_technical_signals()
+    
+    if not btc_data or not binance_data:
+        await processing.edit_text("❌ ไม่สามารถดึงข้อมูล BTC ได้ กรุณาลองใหม่")
+        return
+    
+    # สร้างรายงาน
+    report = "🪙 **Bitcoin Alert System**\n\n"
+    
+    # ส่วนที่ 1: ราคาและข้อมูลพื้นฐาน
+    price = btc_data['price']
+    change_24h = btc_data['change_24h']
+    emoji = "🟢" if change_24h >= 0 else "🔴"
+    
+    report += f"💰 **ราคาปัจจุบัน:** ${price:,.2f}\n"
+    report += f"{emoji} **24hr Change:** {change_24h:+.2f}%\n"
+    report += f"📊 **Volume 24hr:** ${btc_data['volume_24h']/1e9:.2f}B\n"
+    report += f"📈 **Market Cap:** ${btc_data['market_cap']/1e9:.2f}B\n\n"
+    
+    # ส่วนที่ 2: ช่วงราคา 24hr
+    report += f"📊 **ช่วงราคา 24hr:**\n"
+    report += f"• สูงสุด: ${binance_data['high_24h']:,.2f}\n"
+    report += f"• ต่ำสุด: ${binance_data['low_24h']:,.2f}\n"
+    report += f"• Trades: {binance_data['trades']:,} รายการ\n\n"
+    
+    # ส่วนที่ 3: Fear & Greed Index
+    if fear_greed:
+        fg_value = fear_greed['value']
+        fg_class = fear_greed['classification']
+        
+        report += f"🎭 **Fear & Greed Index:**\n"
+        
+        if fg_value <= 20:
+            report += f"🟢 {fg_value} - {fg_class}\n"
+            report += f"💡 **Extreme Fear** - เวลาที่ดีในการซื้อ!\n\n"
+        elif fg_value <= 40:
+            report += f"🟡 {fg_value} - {fg_class}\n"
+            report += f"💡 ตลาดกลัว - พิจารณาซื้อเพิ่ม\n\n"
+        elif fg_value <= 60:
+            report += f"⚪ {fg_value} - {fg_class}\n"
+            report += f"💡 ตลาดปกติ - รอสัญญาณชัดเจน\n\n"
+        elif fg_value <= 80:
+            report += f"🟠 {fg_value} - {fg_class}\n"
+            report += f"⚠️ ตลาดโลภ - ระวังราคาปรับฐาน\n\n"
+        else:
+            report += f"🔴 {fg_value} - {fg_class}\n"
+            report += f"⚠️ **Extreme Greed** - ควรระมัดระวัง!\n\n"
+    
+    # ส่วนที่ 4: สัญญาณทางเทคนิค
+    if technical and technical['signals']:
+        report += f"📈 **สัญญาณทางเทคนิค:**\n"
+        for signal in technical['signals']:
+            report += f"• {signal}\n"
+        report += f"\n"
+        
+        # สรุปคะแนน
+        score = technical['score']
+        report += f"🎯 **คะแนนรวม:** {score}/100\n"
+        
+        if score >= 50:
+            report += f"🟢 **คำแนะนำ: STRONG BUY**\n"
+            report += f"💡 มีสัญญาณ Bullish หลายตัว - เหมาะซื้อเพิ่ม\n\n"
+        elif score >= 20:
+            report += f"🟢 **คำแนะนำ: ACCUMULATE**\n"
+            report += f"💡 มีสัญญาณเชิงบวก - ซื้อค่อยๆ เพิ่ม\n\n"
+        elif score >= -20:
+            report += f"🟡 **คำแนะนำ: HOLD**\n"
+            report += f"💡 สัญญาณไม่ชัดเจน - รอดูก่อน\n\n"
+        elif score >= -50:
+            report += f"🔴 **คำแนะนำ: REDUCE**\n"
+            report += f"⚠️ มีสัญญาณ Bearish - พิจารณาลดสัดส่วน\n\n"
+        else:
+            report += f"🔴 **คำแนะนำ: SELL**\n"
+            report += f"⚠️ สัญญาณ Bearish แข็งแกร่ง - ควระระมัดระวัง\n\n"
+    
+    # ส่วนที่ 5: แจ้งเตือนพิเศษ
+    alerts = []
+    
+    # Price Movement Alert
+    if abs(change_24h) >= 5:
+        alerts.append(f"⚡ ราคาเคลื่อนไหวมาก {abs(change_24h):.1f}% ใน 24hr")
+    
+    # Volume Alert
+    if binance_data['volume'] > 50000:  # BTC Volume สูงกว่าปกติ
+        alerts.append(f"📊 Volume สูงผิดปกติ - อาจมี Big Move")
+    
+    # Fear & Greed Extreme
+    if fear_greed:
+        if fear_greed['value'] <= 20 or fear_greed['value'] >= 80:
+            alerts.append(f"🎭 Fear & Greed ที่ระดับ Extreme")
+    
+    if alerts:
+        report += f"🔔 **Alert พิเศษ:**\n"
+        for alert in alerts:
+            report += f"• {alert}\n"
+        report += f"\n"
+    
+    # Footer
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}\n"
+    report += f"💬 พิมพ์ /btc เพื่อดูข้อมูลอีกครั้ง"
+    
+    await processing.edit_text(report, parse_mode='Markdown')
+
+
+async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ดูราคา BTC แบบรวดเร็ว"""
+    binance_data = get_binance_ticker("BTCUSDT")
+    btc_data = get_btc_data()
+    
+    if binance_data and btc_data:
+        price = binance_data['price']
+        change = btc_data['change_24h']
+        emoji = "🟢" if change >= 0 else "🔴"
+        
+        report = f"🪙 **Bitcoin**\n\n"
+        report += f"💰 ${price:,.2f}\n"
+        report += f"{emoji} {change:+.2f}% (24hr)\n"
+        report += f"📊 H: ${binance_data['high_24h']:,.2f} | L: ${binance_data['low_24h']:,.2f}\n\n"
+        report += f"💬 พิมพ์ /btc เพื่อดูรายละเอียดเพิ่มเติม"
+        
+        await update.message.reply_text(report, parse_mode='Markdown')
+    else:
+        await update.message.reply_text("❌ ไม่สามารถดึงข้อมูลได้")
+
+
+
 # Health check handler
 async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /health command"""
@@ -689,6 +984,9 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("popular", popular_stocks))
     application.add_handler(CommandHandler("a", quick_analysis))
+    application.add_handler(CommandHandler("btc", btc_alert))
+    application.add_handler(CommandHandler("btcprice", btc_price))
+    application.add_handler(CommandHandler("b", btc_price))  # คำสั่งลัด
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
