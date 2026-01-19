@@ -158,21 +158,23 @@ def get_price_target(symbol):
         return None
 
 def get_btc_data():
-    """ดึงข้อมูล BTC จาก CoinCap API (Free, No Auth Required)"""
+    """ดึงข้อมูล BTC จาก CoinCap API (Free, Reliable)"""
     try:
         url = "https://api.coincap.io/v2/assets/bitcoin"
         
         logger.info(f"🔍 Fetching CoinCap data: {url}")
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=15)
         
         logger.info(f"📡 CoinCap Response Status: {response.status_code}")
-        logger.info(f"📡 CoinCap Response: {response.text[:200]}")
+        logger.info(f"✅ Price: ${current_price:.2f}")
         
         response.raise_for_status()
         data = response.json()
         
         if 'data' in data:
             btc = data['data']
+            logger.info(f"✅ CoinCap Data: Price=${float(btc['priceUsd']):.2f}")
+            
             return {
                 'price': float(btc['priceUsd']),
                 'change_24h': float(btc['changePercent24Hr']),
@@ -180,84 +182,141 @@ def get_btc_data():
                 'market_cap': float(btc['marketCapUsd'])
             }
         else:
-            logger.error(f"❌ No 'data' key in response: {data}")
+            logger.error(f"❌ No 'data' key in CoinCap response")
             return None
             
     except requests.exceptions.Timeout:
-        logger.error("❌ CoinCap API Timeout")
-        return None
+        logger.error("❌ CoinCap API Timeout - trying fallback...")
+        return get_btc_fallback()
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ CoinCap API Error: {e}")
-        logger.error(f"❌ Response content: {getattr(e.response, 'text', 'No response')}")
-        return None
-    except (KeyError, ValueError) as e:
-        logger.error(f"❌ Error parsing CoinCap data: {e}")
-        return None
+        return get_btc_fallback()
     except Exception as e:
         logger.error(f"❌ Unexpected error in get_btc_data: {e}")
         return None
 
-def get_binance_ticker(symbol="BTCUSDT"):
-    """ดึงข้อมูล Real-time จาก CoinCap (แทน Binance)"""
+
+def get_btc_fallback():
+    """Fallback: ใช้ CoinGecko ถ้า CoinCap ล้ม"""
     try:
-        # CoinCap ใช้ id แทน symbol
-        coin_id = "bitcoin" if symbol == "BTCUSDT" else symbol.lower()
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {
+            "ids": "bitcoin",
+            "vs_currencies": "usd",
+            "include_24hr_change": "true",
+            "include_24hr_vol": "true",
+            "include_market_cap": "true"
+        }
+        
+        logger.info("🔄 Trying CoinGecko fallback...")
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'bitcoin' in data:
+            logger.info("✅ CoinGecko fallback success!")
+            return {
+                'price': data['bitcoin']['usd'],
+                'change_24h': data['bitcoin']['usd_24h_change'],
+                'volume_24h': data['bitcoin']['usd_24h_vol'],
+                'market_cap': data['bitcoin']['usd_market_cap']
+            }
+        return None
+    except Exception as e:
+        logger.error(f"❌ CoinGecko fallback also failed: {e}")
+        return None
+
+
+
+def get_binance_ticker(symbol="BTCUSDT"):
+    """ดึงข้อมูล BTC Real-time - ใช้ CoinCap แทน Binance"""
+    try:
+        # แปลง symbol
+        coin_id = "bitcoin" if "BTC" in symbol.upper() else symbol.lower()
+        
         url = f"https://api.coincap.io/v2/assets/{coin_id}"
         
-        logger.info(f"🔍 Fetching CoinCap data for {coin_id}")
-        response = requests.get(url, timeout=10)
+        logger.info(f"🔍 Fetching CoinCap ticker for {coin_id}")
+        response = requests.get(url, timeout=15)
         
-        logger.info(f"📡 CoinCap Response Status: {response.status_code}")
+        logger.info(f"📡 CoinCap Ticker Status: {response.status_code}")
         
         response.raise_for_status()
         data = response.json()
         
         if 'data' in data:
             btc = data['data']
-            
-            # คำนวณ high/low โดยประมาณจาก price และ change
             current_price = float(btc['priceUsd'])
             change_pct = float(btc['changePercent24Hr'])
             
-            # ประมาณ high/low (เพราะ CoinCap ไม่มีข้อมูลนี้)
-            estimated_range = abs(current_price * change_pct / 100)
-            high_24h = current_price + estimated_range
-            low_24h = current_price - estimated_range
+            # คำนวณ high/low โดยประมาณจาก % change
+            # สมมติว่า high = price ตอนนี้ (ถ้า change เป็นบวก)
+            # สมมติว่า low = price - (change amount)
+            change_amount = abs(current_price * change_pct / 100)
+            
+            if change_pct >= 0:
+                high_24h = current_price
+                low_24h = current_price - (change_amount * 2)
+            else:
+                high_24h = current_price + (change_amount * 2)
+                low_24h = current_price
+            
+            logger.info(f"✅ Price: ${current_price:.2f}, Change: {change_pct:+.2f}%")
             
             return {
                 'price': current_price,
                 'high_24h': high_24h,
                 'low_24h': low_24h,
-                'volume': float(btc['volumeUsd24Hr']) / current_price,  # แปลง USD เป็น BTC
+                'volume': float(btc['volumeUsd24Hr']) / current_price,
                 'price_change_pct': change_pct,
                 'trades': 0  # CoinCap ไม่มีข้อมูลนี้
             }
         else:
-            logger.error(f"❌ No data in response: {data}")
+            logger.error("❌ No data in CoinCap ticker response")
             return None
         
-    except requests.exceptions.Timeout:
-        logger.error("❌ CoinCap API Timeout")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ CoinCap API Error: {e}")
-        logger.error(f"❌ Response: {getattr(e.response, 'text', 'No response')}")
-        return None
-    except (KeyError, ValueError) as e:
-        logger.error(f"❌ Error parsing CoinCap data: {e}")
-        return None
     except Exception as e:
-        logger.error(f"❌ Unexpected error in get_binance_ticker: {e}")
+        logger.error(f"❌ Error in get_binance_ticker: {e}")
+        # ลอง fallback
+        return get_binance_fallback()
+
+def get_binance_fallback():
+    """ลองใช้ Binance จริงๆ เป็น fallback"""
+    try:
+        url = "https://api.binance.com/api/v3/ticker/24hr"
+        params = {"symbol": "BTCUSDT"}
+        
+        logger.info("🔄 Trying real Binance API...")
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info("✅ Binance API works!")
+            return {
+                'price': float(data['lastPrice']),
+                'high_24h': float(data['highPrice']),
+                'low_24h': float(data['lowPrice']),
+                'volume': float(data['volume']),
+                'price_change_pct': float(data['priceChangePercent']),
+                'trades': int(data['count'])
+            }
+        else:
+            logger.warning(f"⚠️ Binance returned status {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"❌ Binance fallback failed: {e}")
         return None
 
+
+
 def get_fear_greed_index():
-    """ดึง Fear & Greed Index (Free API) - improved"""
+    """ดึง Fear & Greed Index - ปรับปรุงแล้ว"""
     try:
         url = "https://api.alternative.me/fng/"
         params = {"limit": 1}
         
         logger.info("🔍 Fetching Fear & Greed Index")
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
         
         logger.info(f"📡 F&G Response Status: {response.status_code}")
         
@@ -267,44 +326,45 @@ def get_fear_greed_index():
         if data.get('data') and len(data['data']) > 0:
             value = int(data['data'][0]['value'])
             classification = data['data'][0]['value_classification']
+            logger.info(f"✅ Fear & Greed: {value} ({classification})")
             return {'value': value, 'classification': classification}
         else:
-            logger.error(f"❌ No data in F&G response: {data}")
+            logger.warning("⚠️ No Fear & Greed data available")
             return None
             
-    except requests.exceptions.Timeout:
-        logger.error("❌ Fear & Greed API Timeout")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Fear & Greed API Error: {e}")
-        return None
     except Exception as e:
-        logger.error(f"❌ Unexpected error in get_fear_greed_index: {e}")
+        logger.error(f"❌ Fear & Greed Error: {e}")
+        # ไม่ fatal - ให้ทำงานต่อได้
         return None
 
 def get_btc_technical_signals():
-    """วิเคราะห์สัญญาณทางเทคนิคของ BTC"""
+    """วิเคราะห์สัญญาณทางเทคนิคของ BTC - ปรับปรุงแล้ว"""
     try:
-        # ใช้ Binance data หรือ Twelve Data
-        binance_data = get_binance_ticker("BTCUSDT")
-        if not binance_data:
+        # ลอง CoinCap ก่อน
+        btc_data = get_binance_ticker("BTCUSDT")
+        
+        if not btc_data:
+            logger.error("❌ Cannot get BTC data for technical analysis")
             return None
         
         # ดึง Technical Indicators (ถ้ามี Twelve Data Key)
-        if TWELVE_DATA_KEY:
-            rsi = get_rsi("BTC/USD")
-            macd, macd_signal = get_macd("BTC/USD")
-            ema_20 = get_ema("BTC/USD", 20)
-            ema_50 = get_ema("BTC/USD", 50)
-        else:
-            rsi = None
-            macd = None
-            macd_signal = None
-            ema_20 = None
-            ema_50 = None
+        rsi = None
+        macd = None
+        macd_signal = None
+        ema_20 = None
+        ema_50 = None
         
-        current_price = binance_data['price']
+        if TWELVE_DATA_KEY and TWELVE_DATA_KEY != "":
+            try:
+                rsi = get_rsi("BTC/USD")
+                macd, macd_signal = get_macd("BTC/USD")
+                ema_20 = get_ema("BTC/USD", 20)
+                ema_50 = get_ema("BTC/USD", 50)
+                logger.info("✅ Technical indicators loaded from TwelveData")
+            except:
+                logger.warning("⚠️ TwelveData failed, using price-only analysis")
         
+        current_price = btc_data['price']
         signals = []
         score = 0
         
@@ -346,13 +406,17 @@ def get_btc_technical_signals():
                 signals.append("➡️ EMA: Sideways")
         
         # 24hr Price Movement
-        price_change = binance_data['price_change_pct']
+        price_change = btc_data['price_change_pct']
         if price_change >= 5:
             signals.append(f"🚀 ราคาพุ่ง +{price_change:.1f}% ใน 24hr")
             score += 15
         elif price_change <= -5:
             signals.append(f"📉 ราคาร่วง {price_change:.1f}% ใน 24hr")
             score -= 15
+        else:
+            signals.append(f"➡️ ราคาเปลี่ยน {price_change:+.1f}% ใน 24hr")
+        
+        logger.info(f"✅ Technical analysis complete. Score: {score}")
         
         return {
             'signals': signals,
@@ -364,9 +428,8 @@ def get_btc_technical_signals():
         }
         
     except Exception as e:
-        logger.error(f"Error analyzing BTC signals: {e}")
+        logger.error(f"❌ Error analyzing BTC signals: {e}")
         return None
-
 
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
@@ -892,51 +955,61 @@ async def quick_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ระบบแจ้งเตือน BTC แบบครบวงจร - improved"""
-    processing = await update.message.reply_text("🔍 กำลังวิเคราะห์ BTC...\n⏳ กำลังดึงข้อมูล...")
+    """ระบบแจ้งเตือน BTC แบบครบวงจร - ปรับปรุงแล้ว"""
+    processing = await update.message.reply_text(
+        "🔍 กำลังวิเคราะห์ Bitcoin...\n"
+        "⏳ กำลังดึงข้อมูลจาก CoinCap API..."
+    )
     
-    # ดึงข้อมูลทั้งหมด - Binance is priority
-    binance_data = get_binance_ticker("BTCUSDT")
-    btc_data = get_btc_data()  # For market cap
+    # ดึงข้อมูลทั้งหมด
+    btc_ticker = get_binance_ticker("BTCUSDT")
+    btc_data = get_btc_data()
     fear_greed = get_fear_greed_index()
     technical = get_btc_technical_signals()
     
-    # Check if we have minimum required data
-    if not binance_data:
+    # ตรวจสอบว่ามีข้อมูลพื้นฐานหรือไม่
+    if not btc_ticker and not btc_data:
         await processing.edit_text(
-            "❌ ไม่สามารถดึงข้อมูลจาก Binance ได้\n\n"
-            "กรุณาตรวจสอบ:\n"
-            "• การเชื่อมต่ออินเทอร์เน็ต\n"
-            "• Binance API status\n"
-            "• Logs สำหรับรายละเอียด"
+            "❌ ไม่สามารถดึงข้อมูล Bitcoin ได้\n\n"
+            "**สาเหตุที่เป็นไปได้:**\n"
+            "• เซิร์ฟเวอร์ไม่สามารถเชื่อมต่อ CoinCap API\n"
+            "• เซิร์ฟเวอร์ไม่สามารถเชื่อมต่อ CoinGecko API\n"
+            "• ปัญหา Network ของ Render\n\n"
+            "**แนะนำ:**\n"
+            "• ลองใหม่อีกครั้งในอีก 1-2 นาที\n"
+            "• ติดต่อผู้ดูแลระบบถ้ายังใช้งานไม่ได้"
         )
         return
     
-    # สร้างรายงาน
-    report = "🪙 **Bitcoin Alert System**\n\n"
+    # ใช้ข้อมูลจากแหล่งที่มี
+    data_source = btc_ticker if btc_ticker else btc_data
     
-    # ส่วนที่ 1: ราคาและข้อมูลพื้นฐาน (from Binance)
-    price = binance_data['price']
-    change_24h = binance_data['price_change_pct']
+    # สร้างรายงาน
+    report = "🪙 **Bitcoin Analysis Report**\n\n"
+    
+    # ส่วนที่ 1: ราคาและข้อมูลพื้นฐาน
+    price = data_source['price']
+    change_24h = data_source['change_24h']
     emoji = "🟢" if change_24h >= 0 else "🔴"
     
     report += f"💰 **ราคาปัจจุบัน:** ${price:,.2f}\n"
     report += f"{emoji} **24hr Change:** {change_24h:+.2f}%\n"
-    report += f"📊 **Volume 24hr:** {binance_data['volume']:,.0f} BTC\n"
     
-    # Add market cap if available from CoinGecko
+    if btc_ticker:
+        report += f"📊 **Volume 24hr:** {btc_ticker['volume']:,.0f} BTC\n"
+    
     if btc_data and btc_data.get('market_cap'):
-        report += f"📈 **Market Cap:** ${btc_data['market_cap']/1e9:.2f}B\n\n"
-    else:
-        report += "\n"
+        report += f"📈 **Market Cap:** ${btc_data['market_cap']/1e9:.2f}B\n"
+    
+    report += "\n"
     
     # ส่วนที่ 2: ช่วงราคา 24hr
-    report += f"📊 **ช่วงราคา 24hr:**\n"
-    report += f"• สูงสุด: ${binance_data['high_24h']:,.2f}\n"
-    report += f"• ต่ำสุด: ${binance_data['low_24h']:,.2f}\n"
-    report += f"• Trades: {binance_data['trades']:,} รายการ\n\n"
+    if btc_ticker:
+        report += f"📊 **ช่วงราคา 24hr:**\n"
+        report += f"• สูงสุด: ${btc_ticker['high_24h']:,.2f}\n"
+        report += f"• ต่ำสุด: ${btc_ticker['low_24h']:,.2f}\n\n"
     
-    # ส่วนที่ 3: Fear & Greed Index (optional)
+    # ส่วนที่ 3: Fear & Greed Index
     if fear_greed:
         fg_value = fear_greed['value']
         fg_class = fear_greed['classification']
@@ -959,7 +1032,7 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             report += f"🔴 {fg_value} - {fg_class}\n"
             report += f"⚠️ **Extreme Greed** - ควรระมัดระวัง!\n\n"
     
-    # ส่วนที่ 4: สัญญาณทางเทคนิค (optional)
+    # ส่วนที่ 4: สัญญาณทางเทคนิค
     if technical and technical.get('signals'):
         report += f"📈 **สัญญาณทางเทคนิค:**\n"
         for signal in technical['signals']:
@@ -972,7 +1045,7 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if score >= 50:
             report += f"🟢 **คำแนะนำ: STRONG BUY**\n"
-            report += f"💡 มีสัญญาณ Bullish หลายตัว - เหมาะซื้อเพิ่ม\n\n"
+            report += f"💡 มีสัญญาณ Bullish หลายตัว\n\n"
         elif score >= 20:
             report += f"🟢 **คำแนะนำ: ACCUMULATE**\n"
             report += f"💡 มีสัญญาณเชิงบวก - ซื้อค่อยๆ เพิ่ม\n\n"
@@ -981,26 +1054,19 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             report += f"💡 สัญญาณไม่ชัดเจน - รอดูก่อน\n\n"
         elif score >= -50:
             report += f"🔴 **คำแนะนำ: REDUCE**\n"
-            report += f"⚠️ มีสัญญาณ Bearish - พิจารณาลดสัดส่วน\n\n"
+            report += f"⚠️ มีสัญญาณ Bearish\n\n"
         else:
             report += f"🔴 **คำแนะนำ: SELL**\n"
-            report += f"⚠️ สัญญาณ Bearish แข็งแกร่ง - ควระระมัดระวัง\n\n"
+            report += f"⚠️ สัญญาณ Bearish แข็งแกร่ง\n\n"
     
     # ส่วนที่ 5: แจ้งเตือนพิเศษ
     alerts = []
     
-    # Price Movement Alert
     if abs(change_24h) >= 5:
-        alerts.append(f"⚡ ราคาเคลื่อนไหวมาก {abs(change_24h):.1f}% ใน 24hr")
+        alerts.append(f"⚡ ราคาเคลื่อนไหวมาก {abs(change_24h):.1f}%")
     
-    # Volume Alert
-    if binance_data['volume'] > 50000:  # BTC Volume สูงกว่าปกติ
-        alerts.append(f"📊 Volume สูงผิดปกติ - อาจมี Big Move")
-    
-    # Fear & Greed Extreme
-    if fear_greed:
-        if fear_greed['value'] <= 20 or fear_greed['value'] >= 80:
-            alerts.append(f"🎭 Fear & Greed ที่ระดับ Extreme")
+    if fear_greed and (fear_greed['value'] <= 20 or fear_greed['value'] >= 80):
+        alerts.append(f"🎭 Fear & Greed ที่ระดับ Extreme")
     
     if alerts:
         report += f"🔔 **Alert พิเศษ:**\n"
@@ -1010,30 +1076,40 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Footer
     report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}\n"
-    report += f"💬 พิมพ์ /btc เพื่อดูข้อมูลอีกครั้ง"
+    report += f"🔄 Data: CoinCap API\n"
+    report += f"💬 พิมพ์ /b เพื่อดูราคาอย่างรวดเร็ว"
     
     await processing.edit_text(report, parse_mode='Markdown')
 
 
 async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ดูราคา BTC แบบรวดเร็ว"""
-    binance_data = get_binance_ticker("BTCUSDT")  # จริงๆ ใช้ CoinCap แล้ว
+    """ดูราคา BTC แบบรวดเร็ว - ปรับปรุงแล้ว"""
+    
+    # ลอง CoinCap ก่อน (เร็วกว่า)
+    btc_ticker = get_binance_ticker("BTCUSDT")
     btc_data = get_btc_data()
     
-    if binance_data and btc_data:
-        price = binance_data['price']
-        change = btc_data['change_24h']
+    if btc_ticker:
+        price = btc_ticker['price']
+        change = btc_ticker['price_change_pct']
         emoji = "🟢" if change >= 0 else "🔴"
         
-        report = f"🪙 **Bitcoin** (CoinCap API)\n\n"
+        report = f"🪙 **Bitcoin** (CoinCap)\n\n"
         report += f"💰 ${price:,.2f}\n"
         report += f"{emoji} {change:+.2f}% (24hr)\n"
-        report += f"📊 High: ${binance_data['high_24h']:,.2f} | Low: ${binance_data['low_24h']:,.2f}\n\n"
-        report += f"💬 พิมพ์ /btc เพื่อดูรายละเอียดเพิ่มเติม"
+        report += f"📊 H: ${btc_ticker['high_24h']:,.2f} | L: ${btc_ticker['low_24h']:,.2f}\n"
+        
+        if btc_data and btc_data.get('market_cap'):
+            report += f"💎 MCap: ${btc_data['market_cap']/1e9:.1f}B\n"
+        
+        report += f"\n💬 พิมพ์ /btc เพื่อดูรายละเอียดเพิ่มเติม"
         
         await update.message.reply_text(report, parse_mode='Markdown')
     else:
-        await update.message.reply_text("❌ ไม่สามารถดึงข้อมูลได้ กรุณาลองใหม่")
+        await update.message.reply_text(
+            "❌ ไม่สามารถดึงข้อมูล BTC ได้ในขณะนี้\n\n"
+            "กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ"
+        )
 
 
 # Health check handler
