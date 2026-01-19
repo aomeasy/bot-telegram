@@ -158,81 +158,93 @@ def get_price_target(symbol):
         return None
 
 def get_btc_data():
-    """ดึงข้อมูล BTC จาก CoinGecko (Free API) - with better error handling"""
+    """ดึงข้อมูล BTC จาก CoinCap API (Free, No Auth Required)"""
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price"
-        params = {
-            "ids": "bitcoin",
-            "vs_currencies": "usd",
-            "include_24hr_change": "true",
-            "include_24hr_vol": "true",
-            "include_market_cap": "true"
-        }
+        url = "https://api.coincap.io/v2/assets/bitcoin"
         
-        logger.info(f"🔍 Fetching CoinGecko data: {url}")
-        response = requests.get(url, params=params, timeout=10)
+        logger.info(f"🔍 Fetching CoinCap data: {url}")
+        response = requests.get(url, timeout=10)
         
-        logger.info(f"📡 CoinGecko Response Status: {response.status_code}")
-        logger.info(f"📡 CoinGecko Response: {response.text[:200]}")
+        logger.info(f"📡 CoinCap Response Status: {response.status_code}")
+        logger.info(f"📡 CoinCap Response: {response.text[:200]}")
         
-        response.raise_for_status()  # Raise error for bad status codes
+        response.raise_for_status()
         data = response.json()
         
-        if 'bitcoin' in data:
+        if 'data' in data:
+            btc = data['data']
             return {
-                'price': data['bitcoin']['usd'],
-                'change_24h': data['bitcoin']['usd_24h_change'],
-                'volume_24h': data['bitcoin']['usd_24h_vol'],
-                'market_cap': data['bitcoin']['usd_market_cap']
+                'price': float(btc['priceUsd']),
+                'change_24h': float(btc['changePercent24Hr']),
+                'volume_24h': float(btc['volumeUsd24Hr']),
+                'market_cap': float(btc['marketCapUsd'])
             }
         else:
-            logger.error(f"❌ No 'bitcoin' key in response: {data}")
+            logger.error(f"❌ No 'data' key in response: {data}")
             return None
             
     except requests.exceptions.Timeout:
-        logger.error("❌ CoinGecko API Timeout")
+        logger.error("❌ CoinCap API Timeout")
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ CoinGecko API Error: {e}")
+        logger.error(f"❌ CoinCap API Error: {e}")
         logger.error(f"❌ Response content: {getattr(e.response, 'text', 'No response')}")
+        return None
+    except (KeyError, ValueError) as e:
+        logger.error(f"❌ Error parsing CoinCap data: {e}")
         return None
     except Exception as e:
         logger.error(f"❌ Unexpected error in get_btc_data: {e}")
         return None
 
 def get_binance_ticker(symbol="BTCUSDT"):
-    """ดึงข้อมูล Real-time จาก Binance (Free, No API Key) - improved"""
+    """ดึงข้อมูล Real-time จาก CoinCap (แทน Binance)"""
     try:
-        url = "https://api.binance.com/api/v3/ticker/24hr"
-        params = {"symbol": symbol}
+        # CoinCap ใช้ id แทน symbol
+        coin_id = "bitcoin" if symbol == "BTCUSDT" else symbol.lower()
+        url = f"https://api.coincap.io/v2/assets/{coin_id}"
         
-        logger.info(f"🔍 Fetching Binance data for {symbol}")
-        response = requests.get(url, params=params, timeout=10)
+        logger.info(f"🔍 Fetching CoinCap data for {coin_id}")
+        response = requests.get(url, timeout=10)
         
-        logger.info(f"📡 Binance Response Status: {response.status_code}")
+        logger.info(f"📡 CoinCap Response Status: {response.status_code}")
         
         response.raise_for_status()
         data = response.json()
         
-        return {
-            'price': float(data['lastPrice']),
-            'high_24h': float(data['highPrice']),
-            'low_24h': float(data['lowPrice']),
-            'volume': float(data['volume']),
-            'price_change_pct': float(data['priceChangePercent']),
-            'trades': int(data['count'])
-        }
+        if 'data' in data:
+            btc = data['data']
+            
+            # คำนวณ high/low โดยประมาณจาก price และ change
+            current_price = float(btc['priceUsd'])
+            change_pct = float(btc['changePercent24Hr'])
+            
+            # ประมาณ high/low (เพราะ CoinCap ไม่มีข้อมูลนี้)
+            estimated_range = abs(current_price * change_pct / 100)
+            high_24h = current_price + estimated_range
+            low_24h = current_price - estimated_range
+            
+            return {
+                'price': current_price,
+                'high_24h': high_24h,
+                'low_24h': low_24h,
+                'volume': float(btc['volumeUsd24Hr']) / current_price,  # แปลง USD เป็น BTC
+                'price_change_pct': change_pct,
+                'trades': 0  # CoinCap ไม่มีข้อมูลนี้
+            }
+        else:
+            logger.error(f"❌ No data in response: {data}")
+            return None
         
     except requests.exceptions.Timeout:
-        logger.error("❌ Binance API Timeout")
+        logger.error("❌ CoinCap API Timeout")
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Binance API Error: {e}")
+        logger.error(f"❌ CoinCap API Error: {e}")
         logger.error(f"❌ Response: {getattr(e.response, 'text', 'No response')}")
         return None
     except (KeyError, ValueError) as e:
-        logger.error(f"❌ Error parsing Binance data: {e}")
-        logger.error(f"❌ Data received: {data}")
+        logger.error(f"❌ Error parsing CoinCap data: {e}")
         return None
     except Exception as e:
         logger.error(f"❌ Unexpected error in get_binance_ticker: {e}")
@@ -1004,41 +1016,24 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ดูราคา BTC แบบรวดเร็ว - improved with fallback"""
-    # Try Binance first (most reliable)
-    binance_data = get_binance_ticker("BTCUSDT")
+    """ดูราคา BTC แบบรวดเร็ว"""
+    binance_data = get_binance_ticker("BTCUSDT")  # จริงๆ ใช้ CoinCap แล้ว
+    btc_data = get_btc_data()
     
-    if binance_data:
+    if binance_data and btc_data:
         price = binance_data['price']
-        change = binance_data['price_change_pct']
+        change = btc_data['change_24h']
         emoji = "🟢" if change >= 0 else "🔴"
         
-        report = f"🪙 **Bitcoin**\n\n"
+        report = f"🪙 **Bitcoin** (CoinCap API)\n\n"
         report += f"💰 ${price:,.2f}\n"
         report += f"{emoji} {change:+.2f}% (24hr)\n"
-        report += f"📊 H: ${binance_data['high_24h']:,.2f} | L: ${binance_data['low_24h']:,.2f}\n\n"
+        report += f"📊 High: ${binance_data['high_24h']:,.2f} | Low: ${binance_data['low_24h']:,.2f}\n\n"
         report += f"💬 พิมพ์ /btc เพื่อดูรายละเอียดเพิ่มเติม"
         
         await update.message.reply_text(report, parse_mode='Markdown')
     else:
-        # Fallback: Try CoinGecko
-        btc_data = get_btc_data()
-        if btc_data:
-            price = btc_data['price']
-            change = btc_data['change_24h']
-            emoji = "🟢" if change >= 0 else "🔴"
-            
-            report = f"🪙 **Bitcoin** (CoinGecko)\n\n"
-            report += f"💰 ${price:,.2f}\n"
-            report += f"{emoji} {change:+.2f}% (24hr)\n\n"
-            report += f"💬 พิมพ์ /btc เพื่อดูรายละเอียดเพิ่มเติม"
-            
-            await update.message.reply_text(report, parse_mode='Markdown')
-        else:
-            await update.message.reply_text(
-                "❌ ไม่สามารถดึงข้อมูลได้\n\n"
-                "กรุณาลองใหม่อีกครั้ง หรือตรวจสอบ logs สำหรับรายละเอียด"
-            )
+        await update.message.reply_text("❌ ไม่สามารถดึงข้อมูลได้ กรุณาลองใหม่")
 
 
 # Health check handler
