@@ -360,7 +360,114 @@ def get_stock_analysis(symbol):
     except Exception as e:
         logger.error(f"Error analyzing {symbol}: {e}")
         return None
+
+def get_trading_recommendation(symbol):
+    """วิเคราะห์และให้คำแนะนำการซื้อ-ขาย"""
+    try:
+        quote = get_quote(symbol)
+        if not quote or 'close' not in quote:
+            return None, "ไม่มีข้อมูล"
         
+        current = float(quote['close'])
+        rsi = get_rsi(symbol)
+        macd, macd_signal = get_macd(symbol)
+        ema_20 = get_ema(symbol, 20)
+        ema_50 = get_ema(symbol, 50)
+        price_target = get_price_target(symbol)
+        
+        # คะแนนการวิเคราะห์
+        score = 0
+        signals = []
+        
+        # 1. Valuation (น้ำหนัก 40%)
+        if price_target and price_target.get('target_mean'):
+            target_mean = price_target['target_mean']
+            upside_pct = ((target_mean - current) / current) * 100
+            
+            if upside_pct >= 20:
+                score += 40
+                signals.append(f"💎 Valuation: +{upside_pct:.1f}% (ถูกมาก)")
+            elif upside_pct >= 10:
+                score += 25
+                signals.append(f"💎 Valuation: +{upside_pct:.1f}% (น่าสนใจ)")
+            elif upside_pct >= 0:
+                score += 10
+                signals.append(f"💎 Valuation: +{upside_pct:.1f}% (ยุติธรรม)")
+            elif upside_pct >= -10:
+                score -= 10
+                signals.append(f"⚠️ Valuation: {upside_pct:.1f}% (แพง)")
+            else:
+                score -= 30
+                signals.append(f"🚨 Valuation: {upside_pct:.1f}% (แพงเกิน)")
+        
+        # 2. RSI (น้ำหนัก 20%)
+        if rsi:
+            if rsi <= 30:
+                score += 20
+                signals.append(f"📈 RSI: {rsi:.1f} (Oversold)")
+            elif rsi <= 40:
+                score += 10
+                signals.append(f"📈 RSI: {rsi:.1f} (ต่ำ)")
+            elif rsi >= 70:
+                score -= 20
+                signals.append(f"📉 RSI: {rsi:.1f} (Overbought)")
+            elif rsi >= 60:
+                score -= 10
+                signals.append(f"📉 RSI: {rsi:.1f} (สูง)")
+            else:
+                signals.append(f"➡️ RSI: {rsi:.1f} (กลาง)")
+        
+        # 3. MACD (น้ำหนัก 20%)
+        if macd is not None and macd_signal is not None:
+            if macd > macd_signal:
+                score += 20
+                signals.append("📊 MACD: Bullish")
+            else:
+                score -= 20
+                signals.append("📊 MACD: Bearish")
+        
+        # 4. EMA Trend (น้ำหนัก 20%)
+        if ema_20 and ema_50 and current:
+            if current > ema_20 > ema_50:
+                score += 20
+                signals.append("📈 EMA: Uptrend")
+            elif current < ema_20 < ema_50:
+                score -= 20
+                signals.append("📉 EMA: Downtrend")
+            else:
+                signals.append("➡️ EMA: Sideways")
+        
+        # ตัดสินใจตามคะแนน
+        if score >= 60:
+            recommendation = "🟢 STRONG BUY"
+            emoji = "🚀"
+        elif score >= 30:
+            recommendation = "🟢 ACCUMULATE"
+            emoji = "💰"
+        elif score >= -10:
+            recommendation = "🟡 HOLD"
+            emoji = "✋"
+        elif score >= -40:
+            recommendation = "🔴 REDUCE"
+            emoji = "📉"
+        else:
+            recommendation = "🔴 SELL"
+            emoji = "⚠️"
+        
+        return {
+            'symbol': symbol,
+            'recommendation': recommendation,
+            'emoji': emoji,
+            'score': score,
+            'price': current,
+            'signals': signals
+        }, None
+        
+    except Exception as e:
+        logger.error(f"Error getting recommendation for {symbol}: {e}")
+        return None, str(e)
+
+
 # --- HTTP Health Check Handler (สำหรับป้องกัน Render Sleep) ---
 
 #async def http_health_check(request):
@@ -373,9 +480,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
 
 💡 **วิธีใช้งาน:**
-• พิมพ์ชื่อหุ้น เช่น: AAPL, MSFT, TSLA
+• พิมพ์ชื่อหุ้น เช่น: NVDA,NFLX,AMZN,GOOGL,RKLB,V,MSFT,IVV,AVGO,META
 • /help - ดูคำแนะนำ
 • /popular - ดูหุ้นยอดนิยม
+• /a - คำสั่งด่วน
+• /health - สถานะbot 
 
 ✨ วิเคราะห์ด้วย:
 • RSI, MACD, EMA, Bollinger Bands
@@ -471,6 +580,94 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
 
+async def quick_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """วิเคราะห์ด่วนหุ้นที่ถืออยู่"""
+    portfolio = ["NVDA", "NFLX", "AMZN", "GOOGL", "RKLB", "V", "MSFT", "IVV", "AVGO", "META"]
+    
+    processing = await update.message.reply_text(
+        f"🔍 กำลังวิเคราะห์ {len(portfolio)} หุ้นในพอร์ต...\n"
+        f"⏳ กรุณารอสักครู่..."
+    )
+    
+    results = []
+    for symbol in portfolio:
+        result, error = get_trading_recommendation(symbol)
+        if result:
+            results.append(result)
+        else:
+            results.append({
+                'symbol': symbol,
+                'recommendation': '❌ ไม่มีข้อมูล',
+                'emoji': '❓',
+                'score': 0,
+                'price': 0,
+                'signals': []
+            })
+    
+    # สร้างรายงานสรุป
+    report = "📊 **Portfolio Quick Analysis**\n\n"
+    
+    # แยกตามคำแนะนำ
+    strong_buy = [r for r in results if 'STRONG BUY' in r['recommendation']]
+    accumulate = [r for r in results if 'ACCUMULATE' in r['recommendation']]
+    hold = [r for r in results if 'HOLD' in r['recommendation']]
+    reduce = [r for r in results if 'REDUCE' in r['recommendation']]
+    sell = [r for r in results if 'SELL' in r['recommendation'] and 'STRONG' not in r['recommendation']]
+    
+    # แสดงผลตามหมวดหมู่
+    if strong_buy:
+        report += "🟢 **STRONG BUY** (คะแนน 60+)\n"
+        for r in sorted(strong_buy, key=lambda x: x['score'], reverse=True):
+            report += f"{r['emoji']} {r['symbol']}: ${r['price']:.2f} (Score: {r['score']})\n"
+        report += "\n"
+    
+    if accumulate:
+        report += "🟢 **ACCUMULATE** (คะแนน 30-59)\n"
+        for r in sorted(accumulate, key=lambda x: x['score'], reverse=True):
+            report += f"{r['emoji']} {r['symbol']}: ${r['price']:.2f} (Score: {r['score']})\n"
+        report += "\n"
+    
+    if hold:
+        report += "🟡 **HOLD** (คะแนน -10 ถึง 29)\n"
+        for r in sorted(hold, key=lambda x: x['score'], reverse=True):
+            report += f"{r['emoji']} {r['symbol']}: ${r['price']:.2f} (Score: {r['score']})\n"
+        report += "\n"
+    
+    if reduce:
+        report += "🔴 **REDUCE** (คะแนน -40 ถึง -11)\n"
+        for r in sorted(reduce, key=lambda x: x['score'], reverse=True):
+            report += f"{r['emoji']} {r['symbol']}: ${r['price']:.2f} (Score: {r['score']})\n"
+        report += "\n"
+    
+    if sell:
+        report += "🔴 **SELL** (คะแนน ต่ำกว่า -40)\n"
+        for r in sorted(sell, key=lambda x: x['score'], reverse=True):
+            report += f"{r['emoji']} {r['symbol']}: ${r['price']:.2f} (Score: {r['score']})\n"
+        report += "\n"
+    
+    # สรุปภาพรวม
+    report += "📝 **สรุปภาพรวม:**\n"
+    report += f"• Strong Buy/Accumulate: {len(strong_buy) + len(accumulate)} หุ้น\n"
+    report += f"• Hold: {len(hold)} หุ้น\n"
+    report += f"• Reduce/Sell: {len(reduce) + len(sell)} หุ้น\n\n"
+    
+    # แนะนำการดำเนินการ
+    action_count = len(strong_buy) + len(accumulate)
+    if action_count >= 5:
+        report += "💡 **คำแนะนำ:** มีหลายหุ้นน่าสนใจ - พิจารณาเพิ่มสัดส่วนในหุ้นที่ Strong Buy\n"
+    elif action_count >= 3:
+        report += "💡 **คำแนะนำ:** มีบางหุ้นน่าสนใจ - Accumulate ตามจังหวะ\n"
+    elif len(sell) + len(reduce) >= 4:
+        report += "⚠️ **คำแนะนำ:** พอร์ตมีความเสี่ยง - พิจารณา Rebalance\n"
+    else:
+        report += "✅ **คำแนะนำ:** พอร์ตสมดุล - Hold และติดตามต่อ\n"
+    
+    report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+    report += f"\n\n💬 พิมพ์ชื่อหุ้นเพื่อดูรายละเอียดเพิ่มเติม"
+    
+    await processing.edit_text(report, parse_mode='Markdown')
+
+
 # Health check handler
 async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /health command"""
@@ -478,6 +675,10 @@ async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
+
+
+
+
 
 # --- Main ---
 
@@ -487,6 +688,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("popular", popular_stocks))
+    application.add_handler(CommandHandler("a", quick_analysis))
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
