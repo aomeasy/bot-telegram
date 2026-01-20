@@ -3,11 +3,10 @@ import logging
 import requests
 import time
 from collections import deque
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.ext import CallbackContext
-from functools import lru_cache
-from datetime import datetime, timedelta
 
  
 
@@ -36,7 +35,7 @@ class RateLimiter:
 
 # สร้าง rate limiter สำหรับแต่ละ API
 twelve_data_limiter = RateLimiter(max_calls=6, period=60)  # ปลอดภัย: 6 calls/min
-# massive_limiter = RateLimiter(max_calls=60, period=60)  # 60 calls/min
+massive_limiter = RateLimiter(max_calls=60, period=60)  # 60 calls/min
 
 
 logging.basicConfig(
@@ -51,8 +50,7 @@ TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "NM9JUC6IIMTZCQIA")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-# MASSIVE_API_KEY = os.environ.get("MASSIVE_API_KEY", "0PYpBi0FWtRGox1nWfHkotKSBhTepRNU")
-FMP_API_KEY = os.environ.get("FMP_API_KEY", "hPQqCSKAkUAjTiV2GUgttI7f5l5PC3oi")  # เพิ่มบรรทัดนี้
+MASSIVE_API_KEY = os.environ.get("MASSIVE_API_KEY", "0PYpBi0FWtRGox1nWfHkotKSBhTepRNU")
 
 
 # --- Portfolio Configuration ---
@@ -87,27 +85,9 @@ PORTFOLIO = {
 ALL_STOCKS = []
 for category in PORTFOLIO.values():
     ALL_STOCKS.extend(category["stocks"])
- 
-# Cache สำหรับข้อมูลที่อัพเดทเร็ว (Quote, Technical)
-quote_cache = {}
-CACHE_DURATION_QUOTE = 60  # 1 นาที
 
-fundamental_cache = {}
-CACHE_DURATION_FUNDAMENTAL = 3600  # 1 ชั่วโมง
+# --- API Functions (คงเดิมทั้งหมด) ---
 
-def get_cached_data(cache_dict, key, duration):
-    """ดึงข้อมูลจาก cache ถ้ายังไม่หมดอายุ"""
-    if key in cache_dict:
-        data, timestamp = cache_dict[key]
-        if datetime.now() - timestamp < timedelta(seconds=duration):
-            logger.info(f"✅ Using cached data for {key}")
-            return data
-    return None
-
-def set_cached_data(cache_dict, key, data):
-    """เก็บข้อมูลใน cache"""
-    cache_dict[key] = (data, datetime.now()) 
- 
 def quick_api_call(url, params=None, timeout=3):
     """เรียก API แบบรวดเร็ว พร้อม timeout สั้น"""
     try:
@@ -220,7 +200,118 @@ def get_bbands(symbol):
 # ฟังก์ชันใหม่: ดึงข้อมูลจาก Massive.com
 # ========================================
 
- 
+def get_massive_quote(symbol):
+    """ดึงข้อมูลหุ้นจาก Massive.com"""
+    try:
+        massive_limiter.wait_if_needed()
+        
+        url = f"https://api.massive.com/v1/stock/quote/{symbol}"
+        headers = {
+            "Authorization": f"Bearer {MASSIVE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"✅ Massive quote data for {symbol}: {data}")
+            return data
+        else:
+            logger.error(f"❌ Massive API error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive quote: {e}")
+        return None
+
+def get_massive_fundamentals(symbol):
+    """ดึงข้อมูล Fundamental จาก Massive.com"""
+    try:
+        massive_limiter.wait_if_needed()
+        
+        url = f"https://api.massive.com/v1/stock/fundamentals/{symbol}"
+        headers = {
+            "Authorization": f"Bearer {MASSIVE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"📊 Massive fundamentals for {symbol}: {data}")
+            
+            # แปลงข้อมูลให้ตรงกับโครงสร้างเดิม
+            return {
+                'pe_ratio': data.get('peRatio'),
+                'pb_ratio': data.get('pbRatio'),
+                'debt_to_equity': data.get('debtToEquity'),
+                'eps': data.get('eps'),
+                'roe': data.get('roe'),
+                'profit_margin': data.get('profitMargin'),
+                'operating_margin': data.get('operatingMargin'),
+                'dividend_yield': data.get('dividendYield'),
+                'beta': data.get('beta'),
+                'revenue_per_share': data.get('revenuePerShare'),
+                'quarterly_earnings_growth': data.get('earningsGrowthYoY'),
+                'quarterly_revenue_growth': data.get('revenueGrowthYoY'),
+                'book_value': data.get('bookValue'),
+                'ebitda': data.get('ebitda'),
+                'pe_ratio_forward': data.get('forwardPE'),
+                'peg_ratio': data.get('pegRatio'),
+                'market_cap': data.get('marketCap')
+            }
+        else:
+            logger.warning(f"⚠️ Massive fundamentals API error {response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive fundamentals: {e}")
+        return None
+
+def get_massive_earnings(symbol):
+    """ดึงข้อมูล Earnings จาก Massive.com"""
+    try:
+        massive_limiter.wait_if_needed()
+        
+        url = f"https://api.massive.com/v1/stock/earnings/{symbol}"
+        headers = {
+            "Authorization": f"Bearer {MASSIVE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if not data or len(data) < 2:
+                return None
+            
+            current = data[0]
+            previous = data[1]
+            
+            current_eps = current.get('eps', 0)
+            previous_eps = previous.get('eps', 0)
+            
+            earnings_growth = None
+            if previous_eps != 0:
+                earnings_growth = ((current_eps - previous_eps) / abs(previous_eps)) * 100
+            
+            return {
+                'current_eps': current_eps,
+                'previous_eps': previous_eps,
+                'earnings_growth_yoy': earnings_growth,
+                'revenue': current.get('revenue'),
+                'revenue_growth': current.get('revenueGrowth')
+            }
+        else:
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive earnings: {e}")
+        return None
 
 def get_analyst_recommendations(symbol):
     """ดึงคำแนะนำจากนักวิเคราะห์ (จาก Finnhub)"""
@@ -268,71 +359,47 @@ def get_price_target(symbol):
 
 
 def get_fundamental_data(symbol):
-    """ดึงข้อมูล Fundamental จาก Financial Modeling Prep"""
+    """ดึงข้อมูล Fundamental จาก Alpha Vantage (OVERVIEW)"""
     try:
-        # ตรวจสอบ cache ก่อน
-        cache_key = f"fmp_fund_{symbol}"
-        cached = get_cached_data(fundamental_cache, cache_key, CACHE_DURATION_FUNDAMENTAL)
-        if cached:
-            return cached
-        
-        # เรียก API สำหรับ Key Metrics
-        url = f"https://financialmodelingprep.com/api/v3/key-metrics/{symbol}"
-        params = {"apikey": FMP_API_KEY, "limit": 1}
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code != 200:
-            logger.warning(f"⚠️ FMP API error {response.status_code}")
+        if not ALPHA_VANTAGE_KEY or ALPHA_VANTAGE_KEY == "":
+            logger.warning("⚠️ ALPHA_VANTAGE_KEY not set")
             return None
+            
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "OVERVIEW",
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
         
-        metrics_data = response.json()
-        
-        if not metrics_data or len(metrics_data) == 0:
+        if not data or 'Symbol' not in data:
             logger.warning(f"⚠️ No fundamental data for {symbol}")
             return None
         
-        metrics = metrics_data[0]
-        
-        # เรียก API สำหรับ Financial Ratios
-        ratios_url = f"https://financialmodelingprep.com/api/v3/ratios/{symbol}"
-        ratios_response = requests.get(ratios_url, params=params, timeout=10)
-        
-        ratios = {}
-        if ratios_response.status_code == 200:
-            ratios_data = ratios_response.json()
-            if ratios_data and len(ratios_data) > 0:
-                ratios = ratios_data[0]
-        
-        # แปลงข้อมูลให้ตรงกับโครงสร้างเดิม
-        result = {
-            'pe_ratio': metrics.get('peRatio'),
-            'pb_ratio': metrics.get('pbRatio'),
-            'debt_to_equity': ratios.get('debtEquityRatio'),
-            'eps': metrics.get('netIncomePerShare'),
-            'roe': metrics.get('roe'),
-            'profit_margin': ratios.get('netProfitMargin'),
-            'operating_margin': ratios.get('operatingProfitMargin'),
-            'dividend_yield': metrics.get('dividendYield'),
-            'beta': metrics.get('beta'),
-            'revenue_per_share': metrics.get('revenuePerShare'),
-            'quarterly_earnings_growth': metrics.get('earningsYield'),
-            'quarterly_revenue_growth': metrics.get('revenuePerShare'),
-            'book_value': metrics.get('bookValuePerShare'),
-            'ebitda': metrics.get('enterpriseValue'),
-            'pe_ratio_forward': metrics.get('peRatio'),
-            'peg_ratio': metrics.get('pegRatio'),
-            'market_cap': metrics.get('marketCap')
+        logger.info(f"📊 Fundamental data for {symbol}: {data}")
+            
+        return {
+            'pe_ratio': float(data.get('PERatio', 0)) if data.get('PERatio') not in ['None', None, ''] else None,
+            'pb_ratio': float(data.get('PriceToBookRatio', 0)) if data.get('PriceToBookRatio') not in ['None', None, ''] else None,
+            'debt_to_equity': float(data.get('DebtToEquity', 0)) if data.get('DebtToEquity') not in ['None', None, ''] else None,
+            'eps': float(data.get('EPS', 0)) if data.get('EPS') not in ['None', None, ''] else None,
+            'roe': float(data.get('ReturnOnEquityTTM', 0)) if data.get('ReturnOnEquityTTM') not in ['None', None, ''] else None,
+            'profit_margin': float(data.get('ProfitMargin', 0)) if data.get('ProfitMargin') not in ['None', None, ''] else None,
+            'operating_margin': float(data.get('OperatingMarginTTM', 0)) if data.get('OperatingMarginTTM') not in ['None', None, ''] else None,
+            'dividend_yield': float(data.get('DividendYield', 0)) if data.get('DividendYield') not in ['None', None, ''] else None,
+            'beta': float(data.get('Beta', 0)) if data.get('Beta') not in ['None', None, ''] else None,
+            'revenue_per_share': float(data.get('RevenuePerShareTTM', 0)) if data.get('RevenuePerShareTTM') not in ['None', None, ''] else None,
+            'quarterly_earnings_growth': float(data.get('QuarterlyEarningsGrowthYOY', 0)) if data.get('QuarterlyEarningsGrowthYOY') not in ['None', None, ''] else None,
+            'quarterly_revenue_growth': float(data.get('QuarterlyRevenueGrowthYOY', 0)) if data.get('QuarterlyRevenueGrowthYOY') not in ['None', None, ''] else None,
+            'book_value': float(data.get('BookValue', 0)) if data.get('BookValue') not in ['None', None, ''] else None,
+            'ebitda': float(data.get('EBITDA', 0)) if data.get('EBITDA') not in ['None', None, ''] else None,
+            'pe_ratio_forward': float(data.get('ForwardPE', 0)) if data.get('ForwardPE') not in ['None', None, ''] else None,
+            'peg_ratio': float(data.get('PEGRatio', 0)) if data.get('PEGRatio') not in ['None', None, ''] else None
         }
-        
-        # บันทึกลง cache
-        set_cached_data(fundamental_cache, cache_key, result)
-        
-        logger.info(f"✅ FMP fundamental data for {symbol}: {result}")
-        return result
-        
     except Exception as e:
-        logger.error(f"❌ Error fetching FMP fundamental data: {e}")
+        logger.error(f"❌ Error fetching fundamental data: {e}")
         return None
 
 def get_cash_flow_data(symbol):
@@ -419,75 +486,100 @@ def get_earnings_data(symbol):
 
 
 def get_stock_analysis(symbol):
-    """วิเคราะห์หุ้นแบบครบถ้วน - PARALLEL API CALLS"""
+    """วิเคราะห์หุ้นแบบครบถ้วน (ใช้ Massive API)"""
     try:
         if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
             return "no_key"
         
         logger.info(f"🔄 Analyzing {symbol}...")
         
-        # ========================================
-        # PARALLEL API CALLS - เรียก API พร้อมกัน
-        # ========================================
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import time
+        # ดึงข้อมูลราคาจาก TwelveData (หรือ Massive)
+        quote = get_quote(symbol)
+        if not quote or 'close' not in quote:
+            # ลองใช้ Massive แทน
+            massive_quote = get_massive_quote(symbol)
+            if massive_quote:
+                quote = {
+                    'close': massive_quote.get('price'),
+                    'previous_close': massive_quote.get('previousClose'),
+                    'high': massive_quote.get('high'),
+                    'low': massive_quote.get('low'),
+                    'open': massive_quote.get('open'),
+                    'name': massive_quote.get('name')
+                }
+            else:
+                return None
         
-        start_time = time.time()
-        results = {}
-        def fetch_quote():
-            return get_quote(symbol)
- 
-        
-        # สร้าง tasks สำหรับดึงข้อมูลแบบ parallel
-        tasks = {
-            'quote': fetch_quote,
-            'rsi': lambda: get_rsi(symbol),
-            'macd': lambda: get_macd(symbol),
-            'ema_20': lambda: get_ema(symbol, 20),
-            'ema_50': lambda: get_ema(symbol, 50),
-            'ema_200': lambda: get_ema(symbol, 200),
-            'bbands': lambda: get_bbands(symbol),
-            'fundamental': lambda: get_fundamental_data(symbol),
-            'earnings': lambda: get_earnings_data(symbol),
-            'recommendations': lambda: get_analyst_recommendations(symbol),
-            'price_target': lambda: get_price_target(symbol)
-        }
-        
-        # เรียก API แบบ parallel (max 5 threads พร้อมกัน)
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_task = {executor.submit(func): name for name, func in tasks.items()}
+        # ดึงข้อมูลเทคนิคคอล - ถ้า error ให้เป็น None แทนที่จะหยุด
+        try:
+            rsi = get_rsi(symbol)
+        except:
+            rsi = None
             
-            for future in as_completed(future_to_task):
-                task_name = future_to_task[future]
-                try:
-                    results[task_name] = future.result()
-                    logger.info(f"✅ {task_name} completed")
-                except Exception as e:
-                    results[task_name] = None
-                    logger.warning(f"⚠️ {task_name} failed: {e}")
+        try:
+            macd, macd_signal = get_macd(symbol)
+        except:
+            macd, macd_signal = None, None
+            
+        try:
+            ema_20 = get_ema(symbol, 20)
+        except:
+            ema_20 = None
+            
+        try:
+            ema_50 = get_ema(symbol, 50)
+        except:
+            ema_50 = None
+            
+        try:
+            ema_200 = get_ema(symbol, 200)
+        except:
+            ema_200 = None
+            
+        try:
+            bb_lower, bb_upper = get_bbands(symbol)
+        except:
+            bb_lower, bb_upper = None, None
         
-        elapsed = time.time() - start_time
-        logger.info(f"⏱️ All API calls completed in {elapsed:.2f}s")
-        
-        # ========================================
-        # Extract results
-        # ========================================
-        quote = results.get('quote')
-        if not quote:
-            return None
-        
-        rsi = results.get('rsi')
-        macd_result = results.get('macd')
-        macd, macd_signal = macd_result if macd_result else (None, None)
-        ema_20 = results.get('ema_20')
-        ema_50 = results.get('ema_50')
-        ema_200 = results.get('ema_200')
-        bbands_result = results.get('bbands')
-        bb_lower, bb_upper = bbands_result if bbands_result else (None, None)
-        fundamental = results.get('fundamental')
-        earnings = results.get('earnings')
-        recommendations = results.get('recommendations')
-        price_target = results.get('price_target')
+        # ดึงข้อมูล Fundamental - ใช้ API คนละตัว (Alpha Vantage, Finnhub)
+        try:
+            recommendations = get_analyst_recommendations(symbol)
+        except:
+            recommendations = None
+            logger.warning(f"⚠️ Cannot get recommendations for {symbol}")
+            
+        try:
+            price_target = get_price_target(symbol)
+        except:
+            price_target = None
+            logger.warning(f"⚠️ Cannot get price target for {symbol}")
+
+     # ดึงข้อมูล Fundamental จาก Massive (แทน Alpha Vantage)
+        try:
+            fundamental = get_massive_fundamentals(symbol)
+            if not fundamental:
+                # Fallback to Alpha Vantage
+                fundamental = get_fundamental_data(symbol)
+        except:
+            fundamental = None
+            logger.warning(f"⚠️ Cannot get fundamental data for {symbol}")
+         
+            
+        try:
+            cash_flow = get_cash_flow_data(symbol)
+        except:
+            cash_flow = None
+            logger.warning(f"⚠️ Cannot get cash flow for {symbol}")
+            
+        # ดึงข้อมูล Earnings จาก Massive
+        try:
+            earnings = get_massive_earnings(symbol)
+            if not earnings:
+                # Fallback to Alpha Vantage
+                earnings = get_earnings_data(symbol)
+        except:
+            earnings = None
+            logger.warning(f"⚠️ Cannot get earnings for {symbol}")
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -525,6 +617,7 @@ def get_stock_analysis(symbol):
             target_low = price_target.get('target_low')
             num_analysts = price_target.get('number_of_analysts', 0)
             
+            # คำนวณ Upside/Downside Potential
             upside_pct = ((target_mean - current) / current) * 100
             
             report += f"• ราคาเป้าหมาย: ${target_mean:.2f}"
@@ -537,6 +630,7 @@ def get_stock_analysis(symbol):
             if num_analysts > 0:
                 report += f"• นักวิเคราะห์: {num_analysts} คน\n"
             
+            # แสดง Upside/Downside พร้อม Margin of Safety
             if upside_pct >= 20:
                 report += f"🎯 Upside: +{upside_pct:.1f}% ⭐⭐⭐\n"
                 report += f"✅ ราคาถูกมาก - Margin of Safety สูง\n\n"
@@ -555,7 +649,7 @@ def get_stock_analysis(symbol):
 
 
 
-        # ============ Fundamental Analysis ============
+             # ============ Fundamental Analysis ============
         if fundamental:
             report += f"📊 **Fundamental Analysis:**\n"
             
@@ -685,7 +779,6 @@ def get_stock_analysis(symbol):
                     report += "\n"
             
             report += "\n"
-      
           
         # ============ Cash Flow Analysis ============
         if cash_flow:
@@ -721,9 +814,10 @@ def get_stock_analysis(symbol):
             
             report += "\n"
         
-
         # ============ Earnings Growth ============
-        if earnings and earnings.get('earnings_growth_yoy') is not None:
+    
+
+       if earnings and earnings.get('earnings_growth_yoy') is not None:
             growth = earnings['earnings_growth_yoy']
             report += f"📈 **Earnings Growth (YoY):** {growth:+.1f}%"
             if growth >= 20:
