@@ -3,10 +3,11 @@ import logging
 import requests
 import time
 from collections import deque
-from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.ext import CallbackContext
+from functools import lru_cache
+from datetime import datetime, timedelta
 
  
 
@@ -85,9 +86,24 @@ PORTFOLIO = {
 ALL_STOCKS = []
 for category in PORTFOLIO.values():
     ALL_STOCKS.extend(category["stocks"])
+ 
+# Cache สำหรับข้อมูลที่อัพเดทเร็ว (Quote, Technical)
+quote_cache = {}
+CACHE_DURATION_QUOTE = 60  # 1 นาที
 
-# --- API Functions (คงเดิมทั้งหมด) ---
+def get_cached_data(cache_dict, key, duration):
+    """ดึงข้อมูลจาก cache ถ้ายังไม่หมดอายุ"""
+    if key in cache_dict:
+        data, timestamp = cache_dict[key]
+        if datetime.now() - timestamp < timedelta(seconds=duration):
+            logger.info(f"✅ Using cached data for {key}")
+            return data
+    return None
 
+def set_cached_data(cache_dict, key, data):
+    """เก็บข้อมูลใน cache"""
+    cache_dict[key] = (data, datetime.now()) 
+ 
 def quick_api_call(url, params=None, timeout=3):
     """เรียก API แบบรวดเร็ว พร้อม timeout สั้น"""
     try:
@@ -224,10 +240,20 @@ def get_massive_quote(symbol):
     except Exception as e:
         logger.error(f"❌ Error fetching Massive quote: {e}")
         return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive quote: {e}")
+        return None
 
 def get_massive_fundamentals(symbol):
-    """ดึงข้อมูล Fundamental จาก Massive.com"""
+    """ดึงข้อมูล Fundamental จาก Massive.com (มี cache)"""
     try:
+        # ตรวจสอบ cache ก่อน
+        cache_key = f"massive_fund_{symbol}"
+        cached = get_cached_data(fundamental_cache, cache_key, CACHE_DURATION_FUNDAMENTAL)
+        if cached:
+            return cached
+        
         massive_limiter.wait_if_needed()
         
         url = f"https://api.massive.com/v1/stock/fundamentals/{symbol}"
@@ -243,7 +269,7 @@ def get_massive_fundamentals(symbol):
             logger.info(f"📊 Massive fundamentals for {symbol}: {data}")
             
             # แปลงข้อมูลให้ตรงกับโครงสร้างเดิม
-            return {
+            result = {
                 'pe_ratio': data.get('peRatio'),
                 'pb_ratio': data.get('pbRatio'),
                 'debt_to_equity': data.get('debtToEquity'),
@@ -262,6 +288,10 @@ def get_massive_fundamentals(symbol):
                 'peg_ratio': data.get('pegRatio'),
                 'market_cap': data.get('marketCap')
             }
+            
+            # บันทึกลง cache
+            set_cached_data(fundamental_cache, cache_key, result)
+            return result
         else:
             logger.warning(f"⚠️ Massive fundamentals API error {response.status_code}")
             return None
@@ -486,100 +516,87 @@ def get_earnings_data(symbol):
 
 
 def get_stock_analysis(symbol):
-    """วิเคราะห์หุ้นแบบครบถ้วน (ใช้ Massive API)"""
+    """วิเคราะห์หุ้นแบบครบถ้วน - PARALLEL API CALLS"""
     try:
         if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
             return "no_key"
         
         logger.info(f"🔄 Analyzing {symbol}...")
         
-        # ดึงข้อมูลราคาจาก TwelveData (หรือ Massive)
-        quote = get_quote(symbol)
-        if not quote or 'close' not in quote:
-            # ลองใช้ Massive แทน
-            massive_quote = get_massive_quote(symbol)
-            if massive_quote:
-                quote = {
-                    'close': massive_quote.get('price'),
-                    'previous_close': massive_quote.get('previousClose'),
-                    'high': massive_quote.get('high'),
-                    'low': massive_quote.get('low'),
-                    'open': massive_quote.get('open'),
-                    'name': massive_quote.get('name')
-                }
-            else:
-                return None
+        # ========================================
+        # PARALLEL API CALLS - เรียก API พร้อมกัน
+        # ========================================
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time
         
-        # ดึงข้อมูลเทคนิคคอล - ถ้า error ให้เป็น None แทนที่จะหยุด
-        try:
-            rsi = get_rsi(symbol)
-        except:
-            rsi = None
-            
-        try:
-            macd, macd_signal = get_macd(symbol)
-        except:
-            macd, macd_signal = None, None
-            
-        try:
-            ema_20 = get_ema(symbol, 20)
-        except:
-            ema_20 = None
-            
-        try:
-            ema_50 = get_ema(symbol, 50)
-        except:
-            ema_50 = None
-            
-        try:
-            ema_200 = get_ema(symbol, 200)
-        except:
-            ema_200 = None
-            
-        try:
-            bb_lower, bb_upper = get_bbands(symbol)
-        except:
-            bb_lower, bb_upper = None, None
+        start_time = time.time()
+        results = {}
         
-        # ดึงข้อมูล Fundamental - ใช้ API คนละตัว (Alpha Vantage, Finnhub)
-        try:
-            recommendations = get_analyst_recommendations(symbol)
-        except:
-            recommendations = None
-            logger.warning(f"⚠️ Cannot get recommendations for {symbol}")
+        def fetch_quote():
+            quote = get_quote(symbol)
+            if not quote or 'close' not in quote:
+                massive_quote = get_massive_quote(symbol)
+                if massive_quote:
+                    return {
+                        'close': massive_quote.get('price'),
+                        'previous_close': massive_quote.get('previousClose'),
+                        'high': massive_quote.get('high'),
+                        'low': massive_quote.get('low'),
+                        'open': massive_quote.get('open'),
+                        'name': massive_quote.get('name')
+                    }
+            return quote
+        
+        # สร้าง tasks สำหรับดึงข้อมูลแบบ parallel
+        tasks = {
+            'quote': fetch_quote,
+            'rsi': lambda: get_rsi(symbol),
+            'macd': lambda: get_macd(symbol),
+            'ema_20': lambda: get_ema(symbol, 20),
+            'ema_50': lambda: get_ema(symbol, 50),
+            'ema_200': lambda: get_ema(symbol, 200),
+            'bbands': lambda: get_bbands(symbol),
+            'fundamental': lambda: get_massive_fundamentals(symbol) or get_fundamental_data(symbol),
+            'earnings': lambda: get_massive_earnings(symbol) or get_earnings_data(symbol),
+            'recommendations': lambda: get_analyst_recommendations(symbol),
+            'price_target': lambda: get_price_target(symbol)
+        }
+        
+        # เรียก API แบบ parallel (max 5 threads พร้อมกัน)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_task = {executor.submit(func): name for name, func in tasks.items()}
             
-        try:
-            price_target = get_price_target(symbol)
-        except:
-            price_target = None
-            logger.warning(f"⚠️ Cannot get price target for {symbol}")
-
-     # ดึงข้อมูล Fundamental จาก Massive (แทน Alpha Vantage)
-        try:
-            fundamental = get_massive_fundamentals(symbol)
-            if not fundamental:
-                # Fallback to Alpha Vantage
-                fundamental = get_fundamental_data(symbol)
-        except:
-            fundamental = None
-            logger.warning(f"⚠️ Cannot get fundamental data for {symbol}")
-         
-            
-        try:
-            cash_flow = get_cash_flow_data(symbol)
-        except:
-            cash_flow = None
-            logger.warning(f"⚠️ Cannot get cash flow for {symbol}")
-            
-        # ดึงข้อมูล Earnings จาก Massive
-        try:
-            earnings = get_massive_earnings(symbol)
-            if not earnings:
-                # Fallback to Alpha Vantage
-                earnings = get_earnings_data(symbol)
-        except:
-            earnings = None
-            logger.warning(f"⚠️ Cannot get earnings for {symbol}")
+            for future in as_completed(future_to_task):
+                task_name = future_to_task[future]
+                try:
+                    results[task_name] = future.result()
+                    logger.info(f"✅ {task_name} completed")
+                except Exception as e:
+                    results[task_name] = None
+                    logger.warning(f"⚠️ {task_name} failed: {e}")
+        
+        elapsed = time.time() - start_time
+        logger.info(f"⏱️ All API calls completed in {elapsed:.2f}s")
+        
+        # ========================================
+        # Extract results
+        # ========================================
+        quote = results.get('quote')
+        if not quote:
+            return None
+        
+        rsi = results.get('rsi')
+        macd_result = results.get('macd')
+        macd, macd_signal = macd_result if macd_result else (None, None)
+        ema_20 = results.get('ema_20')
+        ema_50 = results.get('ema_50')
+        ema_200 = results.get('ema_200')
+        bbands_result = results.get('bbands')
+        bb_lower, bb_upper = bbands_result if bbands_result else (None, None)
+        fundamental = results.get('fundamental')
+        earnings = results.get('earnings')
+        recommendations = results.get('recommendations')
+        price_target = results.get('price_target')
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -617,7 +634,6 @@ def get_stock_analysis(symbol):
             target_low = price_target.get('target_low')
             num_analysts = price_target.get('number_of_analysts', 0)
             
-            # คำนวณ Upside/Downside Potential
             upside_pct = ((target_mean - current) / current) * 100
             
             report += f"• ราคาเป้าหมาย: ${target_mean:.2f}"
@@ -630,7 +646,6 @@ def get_stock_analysis(symbol):
             if num_analysts > 0:
                 report += f"• นักวิเคราะห์: {num_analysts} คน\n"
             
-            # แสดง Upside/Downside พร้อม Margin of Safety
             if upside_pct >= 20:
                 report += f"🎯 Upside: +{upside_pct:.1f}% ⭐⭐⭐\n"
                 report += f"✅ ราคาถูกมาก - Margin of Safety สูง\n\n"
@@ -649,7 +664,7 @@ def get_stock_analysis(symbol):
 
 
 
-             # ============ Fundamental Analysis ============
+        # ============ Fundamental Analysis ============
         if fundamental:
             report += f"📊 **Fundamental Analysis:**\n"
             
@@ -779,6 +794,7 @@ def get_stock_analysis(symbol):
                     report += "\n"
             
             report += "\n"
+      
           
         # ============ Cash Flow Analysis ============
         if cash_flow:
@@ -814,10 +830,9 @@ def get_stock_analysis(symbol):
             
             report += "\n"
         
-        # ============ Earnings Growth ============
-    
 
-       if earnings and earnings.get('earnings_growth_yoy') is not None:
+        # ============ Earnings Growth ============
+        if earnings and earnings.get('earnings_growth_yoy') is not None:
             growth = earnings['earnings_growth_yoy']
             report += f"📈 **Earnings Growth (YoY):** {growth:+.1f}%"
             if growth >= 20:
