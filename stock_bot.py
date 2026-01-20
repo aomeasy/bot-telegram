@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGdi6vv_lY")
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
+ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "NM9JUC6IIMTZCQIA")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # --- Portfolio Configuration ---
@@ -199,6 +200,132 @@ def get_price_target(symbol):
         logger.error(f"❌ Error fetching price target: {e}")
         return None
 
+
+
+def get_fundamental_data(symbol):
+    """ดึงข้อมูล Fundamental จาก Alpha Vantage (OVERVIEW)"""
+    try:
+        if not ALPHA_VANTAGE_KEY or ALPHA_VANTAGE_KEY == "":
+            logger.warning("⚠️ ALPHA_VANTAGE_KEY not set")
+            return None
+            
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "OVERVIEW",
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if not data or 'Symbol' not in data:
+            logger.warning(f"⚠️ No fundamental data for {symbol}")
+            return None
+        
+        logger.info(f"📊 Fundamental data for {symbol}: {data}")
+            
+        return {
+            'pe_ratio': float(data.get('PERatio', 0)) if data.get('PERatio') not in ['None', None, ''] else None,
+            'pb_ratio': float(data.get('PriceToBookRatio', 0)) if data.get('PriceToBookRatio') not in ['None', None, ''] else None,
+            'debt_to_equity': float(data.get('DebtToEquity', 0)) if data.get('DebtToEquity') not in ['None', None, ''] else None,
+            'eps': float(data.get('EPS', 0)) if data.get('EPS') not in ['None', None, ''] else None,
+            'roe': float(data.get('ReturnOnEquityTTM', 0)) if data.get('ReturnOnEquityTTM') not in ['None', None, ''] else None,
+            'profit_margin': float(data.get('ProfitMargin', 0)) if data.get('ProfitMargin') not in ['None', None, ''] else None,
+            'operating_margin': float(data.get('OperatingMarginTTM', 0)) if data.get('OperatingMarginTTM') not in ['None', None, ''] else None,
+            'dividend_yield': float(data.get('DividendYield', 0)) if data.get('DividendYield') not in ['None', None, ''] else None,
+            'beta': float(data.get('Beta', 0)) if data.get('Beta') not in ['None', None, ''] else None,
+            'revenue_per_share': float(data.get('RevenuePerShareTTM', 0)) if data.get('RevenuePerShareTTM') not in ['None', None, ''] else None,
+            'quarterly_earnings_growth': float(data.get('QuarterlyEarningsGrowthYOY', 0)) if data.get('QuarterlyEarningsGrowthYOY') not in ['None', None, ''] else None,
+            'quarterly_revenue_growth': float(data.get('QuarterlyRevenueGrowthYOY', 0)) if data.get('QuarterlyRevenueGrowthYOY') not in ['None', None, ''] else None,
+            'book_value': float(data.get('BookValue', 0)) if data.get('BookValue') not in ['None', None, ''] else None,
+            'ebitda': float(data.get('EBITDA', 0)) if data.get('EBITDA') not in ['None', None, ''] else None,
+            'pe_ratio_forward': float(data.get('ForwardPE', 0)) if data.get('ForwardPE') not in ['None', None, ''] else None,
+            'peg_ratio': float(data.get('PEGRatio', 0)) if data.get('PEGRatio') not in ['None', None, ''] else None
+        }
+    except Exception as e:
+        logger.error(f"❌ Error fetching fundamental data: {e}")
+        return None
+
+def get_cash_flow_data(symbol):
+    """ดึงข้อมูล Cash Flow จาก Alpha Vantage"""
+    try:
+        if not ALPHA_VANTAGE_KEY or ALPHA_VANTAGE_KEY == "":
+            return None
+            
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "CASH_FLOW",
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if not data or 'annualReports' not in data or len(data['annualReports']) == 0:
+            logger.warning(f"⚠️ No cash flow data for {symbol}")
+            return None
+        
+        # ใช้ข้อมูลล่าสุด
+        latest = data['annualReports'][0]
+        
+        operating_cf = float(latest.get('operatingCashflow', 0)) if latest.get('operatingCashflow') not in ['None', None] else None
+        capex = float(latest.get('capitalExpenditures', 0)) if latest.get('capitalExpenditures') not in ['None', None] else None
+        
+        # คำนวณ Free Cash Flow
+        free_cf = None
+        if operating_cf and capex:
+            free_cf = operating_cf - abs(capex)
+        
+        return {
+            'operating_cashflow': operating_cf,
+            'capital_expenditures': capex,
+            'free_cashflow': free_cf
+        }
+    except Exception as e:
+        logger.error(f"❌ Error fetching cash flow: {e}")
+        return None
+
+def get_earnings_data(symbol):
+    """ดึงข้อมูล Earnings จาก Alpha Vantage"""
+    try:
+        if not ALPHA_VANTAGE_KEY or ALPHA_VANTAGE_KEY == "":
+            return None
+            
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "EARNINGS",
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if not data or 'annualEarnings' not in data or len(data['annualEarnings']) < 2:
+            return None
+        
+        # เปรียบเทียบ 2 ปีล่าสุด
+        current_year = data['annualEarnings'][0]
+        previous_year = data['annualEarnings'][1]
+        
+        current_eps = float(current_year.get('reportedEPS', 0)) if current_year.get('reportedEPS') not in ['None', None] else 0
+        previous_eps = float(previous_year.get('reportedEPS', 0)) if previous_year.get('reportedEPS') not in ['None', None] else 0
+        
+        # คำนวณ Growth
+        earnings_growth = None
+        if previous_eps != 0:
+            earnings_growth = ((current_eps - previous_eps) / abs(previous_eps)) * 100
+        
+        return {
+            'current_eps': current_eps,
+            'previous_eps': previous_eps,
+            'earnings_growth_yoy': earnings_growth
+        }
+    except Exception as e:
+        logger.error(f"❌ Error fetching earnings: {e}")
+        return None
+#----------------
+
+
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -220,6 +347,9 @@ def get_stock_analysis(symbol):
         bb_lower, bb_upper = get_bbands(symbol)
         recommendations = get_analyst_recommendations(symbol)
         price_target = get_price_target(symbol)
+        fundamental = get_fundamental_data(symbol)  # เพิ่มบรรทัดนี้
+        cash_flow = get_cash_flow_data(symbol)  # เพิ่มบรรทัดนี้
+        earnings = get_earnings_data(symbol)  # เพิ่มบรรทัดนี้
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -286,7 +416,174 @@ def get_stock_analysis(symbol):
             else:
                 report += f"🚨 Downside: {upside_pct:.1f}%\n"
                 report += f"⛔ ราคาแพงเกินไป - ควรระมัดระวัง\n\n"
+
+# ============ Fundamental Analysis ============
+        if fundamental:
+            report += f"📊 **Fundamental Analysis:**\n"
+            
+            # Valuation Metrics
+            if fundamental.get('pe_ratio'):
+                pe = fundamental['pe_ratio']
+                report += f"• P/E Ratio: {pe:.2f}"
+                if pe < 15:
+                    report += " ⭐⭐⭐ (ถูกมาก)\n"
+                elif pe < 25:
+                    report += " ⭐⭐ (ยุติธรรม)\n"
+                elif pe < 35:
+                    report += " ⭐ (สูง)\n"
+                else:
+                    report += " ⚠️ (แพงเกิน)\n"
+            
+            if fundamental.get('pe_ratio_forward'):
+                report += f"• Forward P/E: {fundamental['pe_ratio_forward']:.2f}\n"
+            
+            if fundamental.get('peg_ratio'):
+                peg = fundamental['peg_ratio']
+                report += f"• PEG Ratio: {peg:.2f}"
+                if peg < 1:
+                    report += " ⭐⭐⭐ (ดีมาก)\n"
+                elif peg < 2:
+                    report += " ⭐⭐ (ดี)\n"
+                else:
+                    report += " ⚠️\n"
+            
+            if fundamental.get('pb_ratio'):
+                pb = fundamental['pb_ratio']
+                report += f"• P/B Ratio: {pb:.2f}"
+                if pb < 1.5:
+                    report += " ⭐⭐⭐\n"
+                elif pb < 3:
+                    report += " ⭐⭐\n"
+                else:
+                    report += " ⭐\n"
+            
+            if fundamental.get('eps'):
+                report += f"• EPS: ${fundamental['eps']:.2f}\n"
+            
+            # Profitability
+            if fundamental.get('roe'):
+                roe = fundamental['roe'] * 100
+                report += f"• ROE: {roe:.1f}%"
+                if roe >= 15:
+                    report += " 💪 (แข็งแกร่ง)\n"
+                elif roe >= 10:
+                    report += " 👍 (ดี)\n"
+                else:
+                    report += " ⚠️ (อ่อนแอ)\n"
+            
+            if fundamental.get('profit_margin'):
+                margin = fundamental['profit_margin'] * 100
+                report += f"• Profit Margin: {margin:.1f}%"
+                if margin >= 20:
+                    report += " 💪\n"
+                elif margin >= 10:
+                    report += " 👍\n"
+                else:
+                    report += "\n"
+            
+            if fundamental.get('operating_margin'):
+                op_margin = fundamental['operating_margin'] * 100
+                report += f"• Operating Margin: {op_margin:.1f}%\n"
+            
+            # Financial Health
+            if fundamental.get('debt_to_equity'):
+                de = fundamental['debt_to_equity']
+                report += f"• Debt/Equity: {de:.2f}"
+                if de < 0.5:
+                    report += " 💚 (ปลอดหนี้)\n"
+                elif de < 1.0:
+                    report += " 🟡 (พอใช้)\n"
+                else:
+                    report += " 🔴 (หนี้สูง)\n"
+            
+            # Growth
+            if fundamental.get('quarterly_earnings_growth'):
+                qeg = fundamental['quarterly_earnings_growth'] * 100
+                report += f"• Quarterly Earnings Growth: {qeg:+.1f}%"
+                if qeg >= 20:
+                    report += " 🚀\n"
+                elif qeg >= 10:
+                    report += " 📈\n"
+                elif qeg >= 0:
+                    report += "\n"
+                else:
+                    report += " 📉\n"
+            
+            if fundamental.get('quarterly_revenue_growth'):
+                qrg = fundamental['quarterly_revenue_growth'] * 100
+                report += f"• Quarterly Revenue Growth: {qrg:+.1f}%\n"
+            
+            # Others
+            if fundamental.get('dividend_yield'):
+                div = fundamental['dividend_yield'] * 100
+                if div > 0:
+                    report += f"• Dividend Yield: {div:.2f}%\n"
+            
+            if fundamental.get('beta'):
+                beta = fundamental['beta']
+                report += f"• Beta: {beta:.2f}"
+                if beta < 1:
+                    report += " (ความผันผวนต่ำ)\n"
+                elif beta > 1.5:
+                    report += " (ความผันผวนสูง)\n"
+                else:
+                    report += "\n"
+            
+            report += "\n"
         
+        # ============ Cash Flow Analysis ============
+        if cash_flow:
+            report += f"💰 **Cash Flow Analysis:**\n"
+            
+            if cash_flow.get('operating_cashflow'):
+                ocf = cash_flow['operating_cashflow'] / 1_000_000_000  # Convert to billions
+                report += f"• Operating Cash Flow: ${ocf:.2f}B"
+                if ocf > 5:
+                    report += " 💪\n"
+                elif ocf > 1:
+                    report += " 👍\n"
+                elif ocf > 0:
+                    report += " ✅\n"
+                else:
+                    report += " ⚠️ (เป็นลบ)\n"
+            
+            if cash_flow.get('capital_expenditures'):
+                capex = abs(cash_flow['capital_expenditures']) / 1_000_000_000
+                report += f"• Capital Expenditures: ${capex:.2f}B\n"
+            
+            if cash_flow.get('free_cashflow'):
+                fcf = cash_flow['free_cashflow'] / 1_000_000_000
+                report += f"• Free Cash Flow: ${fcf:.2f}B"
+                if fcf > 5:
+                    report += " 💪 (แข็งแกร่ง)\n"
+                elif fcf > 1:
+                    report += " 👍 (ดี)\n"
+                elif fcf > 0:
+                    report += " ✅\n"
+                else:
+                    report += " ⚠️ (เป็นลบ)\n"
+            
+            report += "\n"
+        
+        # ============ Earnings Growth ============
+        if earnings and earnings.get('earnings_growth_yoy') is not None:
+            growth = earnings['earnings_growth_yoy']
+            report += f"📈 **Earnings Growth (YoY):** {growth:+.1f}%"
+            if growth >= 20:
+                report += " 🚀 (เติบโตสูง)\n"
+            elif growth >= 10:
+                report += " 📈 (เติบโตดี)\n"
+            elif growth >= 0:
+                report += " ➡️ (เติบโตช้า)\n"
+            else:
+                report += " 📉 (ติดลบ)\n"
+            
+            if earnings.get('current_eps') and earnings.get('previous_eps'):
+                report += f"• Current EPS: ${earnings['current_eps']:.2f}\n"
+                report += f"• Previous EPS: ${earnings['previous_eps']:.2f}\n"
+            
+            report += "\n" 
+    #-------------------
         # RSI Analysis
         if rsi:
             report += f"📈 **RSI (14):** {rsi:.1f}\n"
@@ -416,57 +713,133 @@ def get_trading_recommendation(symbol):
         ema_20 = get_ema(symbol, 20)
         ema_50 = get_ema(symbol, 50)
         price_target = get_price_target(symbol)
+        fundamental = get_fundamental_data(symbol)  # เพิ่มบรรทัดนี้
+        earnings = get_earnings_data(symbol)  # เพิ่มบรรทัดนี้
         
         # คะแนนการวิเคราะห์
         score = 0
         signals = []
         
-        # 1. Valuation (น้ำหนัก 40%)
+        # 1. Valuation (น้ำหนัก 30% ลดลงจาก 40%)
         if price_target and price_target.get('target_mean'):
             target_mean = price_target['target_mean']
             upside_pct = ((target_mean - current) / current) * 100
             
+           
+
             if upside_pct >= 20:
-                score += 40
+                score += 30  # ลดลงจาก 40
                 signals.append(f"💎 Valuation: +{upside_pct:.1f}% (ถูกมาก)")
             elif upside_pct >= 10:
-                score += 25
+                score += 20  # ลดลงจาก 25
                 signals.append(f"💎 Valuation: +{upside_pct:.1f}% (น่าสนใจ)")
             elif upside_pct >= 0:
-                score += 10
+                score += 8  # ลดลงจาก 10
                 signals.append(f"💎 Valuation: +{upside_pct:.1f}% (ยุติธรรม)")
             elif upside_pct >= -10:
                 score -= 10
                 signals.append(f"⚠️ Valuation: {upside_pct:.1f}% (แพง)")
             else:
-                score -= 30
+                score -= 25  # ลดลงจาก 30
                 signals.append(f"🚨 Valuation: {upside_pct:.1f}% (แพงเกิน)")
+
+
+# 1.5 Fundamental Score (น้ำหนัก 20%)
+        if fundamental:
+            # P/E Ratio (10 คะแนน)
+            if fundamental.get('pe_ratio'):
+                pe = fundamental['pe_ratio']
+                if pe < 15:
+                    score += 10
+                    signals.append(f"📊 P/E: {pe:.1f} (ถูก)")
+                elif pe < 25:
+                    score += 5
+                    signals.append(f"📊 P/E: {pe:.1f} (ปกติ)")
+                elif pe > 35:
+                    score -= 10
+                    signals.append(f"📊 P/E: {pe:.1f} (แพง)")
+            
+            # PEG Ratio (5 คะแนน)
+            if fundamental.get('peg_ratio'):
+                peg = fundamental['peg_ratio']
+                if peg < 1:
+                    score += 5
+                    signals.append(f"💎 PEG: {peg:.2f} (ดีมาก)")
+                elif peg > 2:
+                    score -= 5
+                    signals.append(f"⚠️ PEG: {peg:.2f}")
+            
+            # Debt/Equity (5 คะแนน)
+            if fundamental.get('debt_to_equity'):
+                de = fundamental['debt_to_equity']
+                if de < 0.5:
+                    score += 5
+                    signals.append(f"💰 D/E: {de:.2f} (แข็งแกร่ง)")
+                elif de > 1.5:
+                    score -= 5
+                    signals.append(f"⚠️ D/E: {de:.2f} (หนี้สูง)")
+            
+            # ROE (5 คะแนน)
+            if fundamental.get('roe'):
+                roe = fundamental['roe'] * 100
+                if roe >= 15:
+                    score += 5
+                    signals.append(f"💪 ROE: {roe:.1f}%")
+                elif roe < 10:
+                    score -= 5
+                    signals.append(f"⚠️ ROE: {roe:.1f}%")
+            
+            # Profit Margin (5 คะแนน)
+            if fundamental.get('profit_margin'):
+                margin = fundamental['profit_margin'] * 100
+                if margin >= 20:
+                    score += 5
+                    signals.append(f"💰 Margin: {margin:.1f}%")
+                elif margin < 5:
+                    score -= 5
+                    signals.append(f"⚠️ Margin: {margin:.1f}%")
         
-        # 2. RSI (น้ำหนัก 20%)
+        # 1.6 Earnings Growth (10 คะแนน)
+        if earnings and earnings.get('earnings_growth_yoy') is not None:
+            growth = earnings['earnings_growth_yoy']
+            if growth >= 20:
+                score += 10
+                signals.append(f"🚀 Growth: +{growth:.1f}%")
+            elif growth >= 10:
+                score += 5
+                signals.append(f"📈 Growth: +{growth:.1f}%")
+            elif growth < 0:
+                score -= 10
+                signals.append(f"📉 Growth: {growth:.1f}%")
+
+
+
+        # 2. RSI (น้ำหนัก 10% ลดลงจาก 20%)
         if rsi:
             if rsi <= 30:
-                score += 20
+                score += 10  # ลดลงจาก 20
                 signals.append(f"📈 RSI: {rsi:.1f} (Oversold)")
             elif rsi <= 40:
-                score += 10
+                score += 5  # ลดลงจาก 10
                 signals.append(f"📈 RSI: {rsi:.1f} (ต่ำ)")
             elif rsi >= 70:
-                score -= 20
+                score -= 10  # ลดลงจาก 20
                 signals.append(f"📉 RSI: {rsi:.1f} (Overbought)")
             elif rsi >= 60:
-                score -= 10
+                score -= 5  # ลดลงจาก 10
                 signals.append(f"📉 RSI: {rsi:.1f} (สูง)")
             else:
                 signals.append(f"➡️ RSI: {rsi:.1f} (กลาง)")
         
-        # 3. MACD (น้ำหนัก 20%)
+        # 3. MACD (น้ำหนัก 10% ลดลงจาก 20%)
         if macd is not None and macd_signal is not None:
             if macd > macd_signal:
-                score += 20
+                score += 10  # ลดลงจาก 20
                 signals.append("📊 MACD: Bullish")
             else:
-                score -= 20
+                score -= 10  # ลดลงจาก 20
                 signals.append("📊 MACD: Bearish")
+        
         
         # 4. EMA Trend (น้ำหนัก 20%)
         if ema_20 and ema_50 and current:
