@@ -1,10 +1,40 @@
 import os
 import logging
 import requests
+import time
+from collections import deque
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.ext import CallbackContext
+
+ 
+
+# Rate limiter
+class RateLimiter:
+    def __init__(self, max_calls=6, period=60):
+        self.max_calls = max_calls
+        self.period = period
+        self.calls = deque()
+    
+    def wait_if_needed(self):
+        now = time.time()
+        # ลบ calls เก่าที่เกิน period
+        while self.calls and self.calls[0] < now - self.period:
+            self.calls.popleft()
+        
+        # ถ้าเกิน limit ให้รอ
+        if len(self.calls) >= self.max_calls:
+            sleep_time = self.period - (now - self.calls[0]) + 0.5
+            if sleep_time > 0:
+                logger.warning(f"⏳ Rate limit - waiting {sleep_time:.1f}s")
+                time.sleep(sleep_time)
+                self.calls.clear()
+        
+        self.calls.append(time.time())
+
+# สร้าง rate limiter สำหรับแต่ละ API
+twelve_data_limiter = RateLimiter(max_calls=6, period=60)  # ปลอดภัย: 6 calls/min
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -67,6 +97,7 @@ def quick_api_call(url, params=None, timeout=3):
 def get_quote(symbol):
     """ดึงราคาปัจจุบัน"""
     try:
+        twelve_data_limiter.wait_if_needed()  # เพิ่มบรรทัดนี้
         url = "https://api.twelvedata.com/quote"
         params = {"symbol": symbol, "apikey": TWELVE_DATA_KEY}
         response = requests.get(url, params=params, timeout=10)
@@ -83,6 +114,7 @@ def get_quote(symbol):
 def get_rsi(symbol):
     """ดึง RSI (14)"""
     try:
+        twelve_data_limiter.wait_if_needed()
         url = "https://api.twelvedata.com/rsi"
         params = {
             "symbol": symbol,
@@ -102,6 +134,7 @@ def get_rsi(symbol):
 def get_macd(symbol):
     """ดึง MACD"""
     try:
+        twelve_data_limiter.wait_if_needed()
         url = "https://api.twelvedata.com/macd"
         params = {
             "symbol": symbol,
@@ -121,6 +154,7 @@ def get_macd(symbol):
 def get_ema(symbol, period):
     """ดึง EMA"""
     try:
+        twelve_data_limiter.wait_if_needed()
         url = "https://api.twelvedata.com/ema"
         params = {
             "symbol": symbol,
@@ -140,6 +174,7 @@ def get_ema(symbol, period):
 def get_bbands(symbol):
     """ดึง Bollinger Bands"""
     try:
+        twelve_data_limiter.wait_if_needed()
         url = "https://api.twelvedata.com/bbands"
         params = {
             "symbol": symbol,
@@ -325,6 +360,9 @@ def get_earnings_data(symbol):
         return None
 #----------------
 
+ 
+
+
 
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
@@ -334,22 +372,72 @@ def get_stock_analysis(symbol):
         
         logger.info(f"🔄 Analyzing {symbol}...")
         
-        # ดึงข้อมูลทั้งหมด
+        # ดึงข้อมูลทั้งหมด (เพิ่ม error handling)
         quote = get_quote(symbol)
         if not quote or 'close' not in quote:
             return None
         
-        rsi = get_rsi(symbol)
-        macd, macd_signal = get_macd(symbol)
-        ema_20 = get_ema(symbol, 20)
-        ema_50 = get_ema(symbol, 50)
-        ema_200 = get_ema(symbol, 200)
-        bb_lower, bb_upper = get_bbands(symbol)
-        recommendations = get_analyst_recommendations(symbol)
-        price_target = get_price_target(symbol)
-        fundamental = get_fundamental_data(symbol)  # เพิ่มบรรทัดนี้
-        cash_flow = get_cash_flow_data(symbol)  # เพิ่มบรรทัดนี้
-        earnings = get_earnings_data(symbol)  # เพิ่มบรรทัดนี้
+        # ดึงข้อมูลเทคนิคคอล - ถ้า error ให้เป็น None แทนที่จะหยุด
+        try:
+            rsi = get_rsi(symbol)
+        except:
+            rsi = None
+            
+        try:
+            macd, macd_signal = get_macd(symbol)
+        except:
+            macd, macd_signal = None, None
+            
+        try:
+            ema_20 = get_ema(symbol, 20)
+        except:
+            ema_20 = None
+            
+        try:
+            ema_50 = get_ema(symbol, 50)
+        except:
+            ema_50 = None
+            
+        try:
+            ema_200 = get_ema(symbol, 200)
+        except:
+            ema_200 = None
+            
+        try:
+            bb_lower, bb_upper = get_bbands(symbol)
+        except:
+            bb_lower, bb_upper = None, None
+        
+        # ดึงข้อมูล Fundamental - ใช้ API คนละตัว (Alpha Vantage, Finnhub)
+        try:
+            recommendations = get_analyst_recommendations(symbol)
+        except:
+            recommendations = None
+            logger.warning(f"⚠️ Cannot get recommendations for {symbol}")
+            
+        try:
+            price_target = get_price_target(symbol)
+        except:
+            price_target = None
+            logger.warning(f"⚠️ Cannot get price target for {symbol}")
+            
+        try:
+            fundamental = get_fundamental_data(symbol)
+        except:
+            fundamental = None
+            logger.warning(f"⚠️ Cannot get fundamental data for {symbol}")
+            
+        try:
+            cash_flow = get_cash_flow_data(symbol)
+        except:
+            cash_flow = None
+            logger.warning(f"⚠️ Cannot get cash flow for {symbol}")
+            
+        try:
+            earnings = get_earnings_data(symbol)
+        except:
+            earnings = None
+            logger.warning(f"⚠️ Cannot get earnings for {symbol}")
         
         # คำนวณข้อมูลพื้นฐาน
         current = float(quote['close'])
@@ -708,13 +796,50 @@ def get_trading_recommendation(symbol):
             return None, "ไม่มีข้อมูล"
         
         current = float(quote['close'])
-        rsi = get_rsi(symbol)
-        macd, macd_signal = get_macd(symbol)
-        ema_20 = get_ema(symbol, 20)
-        ema_50 = get_ema(symbol, 50)
-        price_target = get_price_target(symbol)
-        fundamental = get_fundamental_data(symbol)  # เพิ่มบรรทัดนี้
-        earnings = get_earnings_data(symbol)  # เพิ่มบรรทัดนี้
+        
+        # ดึงข้อมูลเทคนิคคอล - ถ้า error ให้เป็น None
+        try:
+            rsi = get_rsi(symbol)
+        except:
+            rsi = None
+            logger.warning(f"⚠️ Cannot get RSI for {symbol}")
+            
+        try:
+            macd, macd_signal = get_macd(symbol)
+        except:
+            macd, macd_signal = None, None
+            logger.warning(f"⚠️ Cannot get MACD for {symbol}")
+            
+        try:
+            ema_20 = get_ema(symbol, 20)
+        except:
+            ema_20 = None
+            logger.warning(f"⚠️ Cannot get EMA20 for {symbol}")
+            
+        try:
+            ema_50 = get_ema(symbol, 50)
+        except:
+            ema_50 = None
+            logger.warning(f"⚠️ Cannot get EMA50 for {symbol}")
+        
+        # ดึงข้อมูล Fundamental
+        try:
+            price_target = get_price_target(symbol)
+        except:
+            price_target = None
+            logger.warning(f"⚠️ Cannot get price target for {symbol}")
+            
+        try:
+            fundamental = get_fundamental_data(symbol)
+        except:
+            fundamental = None
+            logger.warning(f"⚠️ Cannot get fundamental data for {symbol}")
+            
+        try:
+            earnings = get_earnings_data(symbol)
+        except:
+            earnings = None
+            logger.warning(f"⚠️ Cannot get earnings for {symbol}")
         
         # คะแนนการวิเคราะห์
         score = 0
