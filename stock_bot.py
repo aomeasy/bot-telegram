@@ -2,10 +2,9 @@ import os
 import logging
 import requests
 from datetime import datetime
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.ext import CallbackContext
-# from aiohttp import web
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -19,7 +18,40 @@ TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# --- API Functions ---
+# --- Portfolio Configuration ---
+PORTFOLIO = {
+    "tech": {
+        "name": "🖥️ Technology",
+        "stocks": ["NVDA", "AVGO", "GOOGL", "META", "MSFT"]
+    },
+    "streaming": {
+        "name": "🎬 Streaming & Media",
+        "stocks": ["NFLX"]
+    },
+    "ecommerce": {
+        "name": "🛒 E-Commerce",
+        "stocks": ["AMZN"]
+    },
+    "space": {
+        "name": "🚀 Space Tech",
+        "stocks": ["RKLB"]
+    },
+    "finance": {
+        "name": "💳 Finance",
+        "stocks": ["V"]
+    },
+    "etf": {
+        "name": "📈 ETF",
+        "stocks": ["IVV"]
+    }
+}
+
+# Flatten portfolio for quick access
+ALL_STOCKS = []
+for category in PORTFOLIO.values():
+    ALL_STOCKS.extend(category["stocks"])
+
+# --- API Functions (คงเดิมทั้งหมด) ---
 
 def quick_api_call(url, params=None, timeout=3):
     """เรียก API แบบรวดเร็ว พร้อม timeout สั้น"""
@@ -167,387 +199,6 @@ def get_price_target(symbol):
         logger.error(f"❌ Error fetching price target: {e}")
         return None
 
-def get_btc_data():
-    """ดึงข้อมูล BTC จาก CoinCap API (Free, Reliable)"""
-    try:
-        url = "https://api.coincap.io/v2/assets/bitcoin"
-        
-        logger.info(f"🔍 Fetching CoinCap data: {url}")
-        response = requests.get(url, timeout=15)
-        
-        logger.info(f"📡 CoinCap Response Status: {response.status_code}")
-        logger.info(f"✅ Price: ${current_price:.2f}")
-        
-        response.raise_for_status()
-        data = response.json()
-        
-        if 'data' in data:
-            btc = data['data']
-            logger.info(f"✅ CoinCap Data: Price=${float(btc['priceUsd']):.2f}")
-            
-            return {
-                'price': float(btc['priceUsd']),
-                'change_24h': float(btc['changePercent24Hr']),
-                'volume_24h': float(btc['volumeUsd24Hr']),
-                'market_cap': float(btc['marketCapUsd'])
-            }
-        else:
-            logger.error(f"❌ No 'data' key in CoinCap response")
-            return None
-            
-    except requests.exceptions.Timeout:
-        logger.error("❌ CoinCap API Timeout - trying fallback...")
-        return get_btc_fallback()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ CoinCap API Error: {e}")
-        return get_btc_fallback()
-    except Exception as e:
-        logger.error(f"❌ Unexpected error in get_btc_data: {e}")
-        return None
-
-
-def get_btc_fallback():
-    """Fallback: ใช้ CoinGecko ถ้า CoinCap ล้ม"""
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price"
-        params = {
-            "ids": "bitcoin",
-            "vs_currencies": "usd",
-            "include_24hr_change": "true",
-            "include_24hr_vol": "true",
-            "include_market_cap": "true"
-        }
-        
-        logger.info("🔄 Trying CoinGecko fallback...")
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        
-        if 'bitcoin' in data:
-            logger.info("✅ CoinGecko fallback success!")
-            return {
-                'price': data['bitcoin']['usd'],
-                'change_24h': data['bitcoin']['usd_24h_change'],
-                'volume_24h': data['bitcoin']['usd_24h_vol'],
-                'market_cap': data['bitcoin']['usd_market_cap']
-            }
-        return None
-    except Exception as e:
-        logger.error(f"❌ CoinGecko fallback also failed: {e}")
-        return None
-
-
-
-def get_binance_ticker(symbol="BTCUSDT"):
-    """ดึงข้อมูล BTC Real-time - ใช้ CoinCap แทน Binance"""
-    try:
-        # แปลง symbol
-        coin_id = "bitcoin" if "BTC" in symbol.upper() else symbol.lower()
-        
-        url = f"https://api.coincap.io/v2/assets/{coin_id}"
-        
-        logger.info(f"🔍 Fetching CoinCap ticker for {coin_id}")
-        response = requests.get(url, timeout=15)
-        
-        logger.info(f"📡 CoinCap Ticker Status: {response.status_code}")
-        
-        response.raise_for_status()
-        data = response.json()
-        
-        if 'data' in data:
-            btc = data['data']
-            current_price = float(btc['priceUsd'])
-            change_pct = float(btc['changePercent24Hr'])
-            
-            # คำนวณ high/low โดยประมาณจาก % change
-            # สมมติว่า high = price ตอนนี้ (ถ้า change เป็นบวก)
-            # สมมติว่า low = price - (change amount)
-            change_amount = abs(current_price * change_pct / 100)
-            
-            if change_pct >= 0:
-                high_24h = current_price
-                low_24h = current_price - (change_amount * 2)
-            else:
-                high_24h = current_price + (change_amount * 2)
-                low_24h = current_price
-            
-            logger.info(f"✅ Price: ${current_price:.2f}, Change: {change_pct:+.2f}%")
-            
-            return {
-                'price': current_price,
-                'high_24h': high_24h,
-                'low_24h': low_24h,
-                'volume': float(btc['volumeUsd24Hr']) / current_price,
-                'price_change_pct': change_pct,
-                'trades': 0  # CoinCap ไม่มีข้อมูลนี้
-            }
-        else:
-            logger.error("❌ No data in CoinCap ticker response")
-            return None
-        
-    except Exception as e:
-        logger.error(f"❌ Error in get_binance_ticker: {e}")
-        # ลอง fallback
-        return get_binance_fallback()
-
-def get_binance_fallback():
-    """ลองใช้ Binance จริงๆ เป็น fallback"""
-    try:
-        url = "https://api.binance.com/api/v3/ticker/24hr"
-        params = {"symbol": "BTCUSDT"}
-        
-        logger.info("🔄 Trying real Binance API...")
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            logger.info("✅ Binance API works!")
-            return {
-                'price': float(data['lastPrice']),
-                'high_24h': float(data['highPrice']),
-                'low_24h': float(data['lowPrice']),
-                'volume': float(data['volume']),
-                'price_change_pct': float(data['priceChangePercent']),
-                'trades': int(data['count'])
-            }
-        else:
-            logger.warning(f"⚠️ Binance returned status {response.status_code}")
-            return None
-    except Exception as e:
-        logger.error(f"❌ Binance fallback failed: {e}")
-        return None
-
-
-
-def get_fear_greed_index():
-    """ดึง Fear & Greed Index - ปรับปรุงแล้ว"""
-    try:
-        url = "https://api.alternative.me/fng/"
-        params = {"limit": 1}
-        
-        logger.info("🔍 Fetching Fear & Greed Index")
-        response = requests.get(url, params=params, timeout=15)
-        
-        logger.info(f"📡 F&G Response Status: {response.status_code}")
-        
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get('data') and len(data['data']) > 0:
-            value = int(data['data'][0]['value'])
-            classification = data['data'][0]['value_classification']
-            logger.info(f"✅ Fear & Greed: {value} ({classification})")
-            return {'value': value, 'classification': classification}
-        else:
-            logger.warning("⚠️ No Fear & Greed data available")
-            return None
-            
-    except Exception as e:
-        logger.error(f"❌ Fear & Greed Error: {e}")
-        # ไม่ fatal - ให้ทำงานต่อได้
-        return None
-
-def get_btc_technical_signals():
-    """วิเคราะห์สัญญาณทางเทคนิคของ BTC - ปรับปรุงแล้ว"""
-    try:
-        # ลอง CoinCap ก่อน
-        btc_data = get_binance_ticker("BTCUSDT")
-        
-        if not btc_data:
-            logger.error("❌ Cannot get BTC data for technical analysis")
-            return None
-        
-        # ดึง Technical Indicators (ถ้ามี Twelve Data Key)
-        rsi = None
-        macd = None
-        macd_signal = None
-        ema_20 = None
-        ema_50 = None
-        
-        if TWELVE_DATA_KEY and TWELVE_DATA_KEY != "":
-            try:
-                rsi = get_rsi("BTC/USD")
-                macd, macd_signal = get_macd("BTC/USD")
-                ema_20 = get_ema("BTC/USD", 20)
-                ema_50 = get_ema("BTC/USD", 50)
-                logger.info("✅ Technical indicators loaded from TwelveData")
-            except:
-                logger.warning("⚠️ TwelveData failed, using price-only analysis")
-        
-        current_price = btc_data['price']
-        signals = []
-        score = 0
-        
-        # RSI Analysis
-        if rsi:
-            if rsi <= 30:
-                signals.append(f"📈 RSI: {rsi:.1f} - OVERSOLD (ซื้อ)")
-                score += 30
-            elif rsi >= 70:
-                signals.append(f"📉 RSI: {rsi:.1f} - OVERBOUGHT (ขาย)")
-                score -= 30
-            elif rsi <= 40:
-                signals.append(f"💚 RSI: {rsi:.1f} - ต่ำ (เริ่มน่าสนใจ)")
-                score += 15
-            elif rsi >= 60:
-                signals.append(f"🔶 RSI: {rsi:.1f} - สูง (ระวัง)")
-                score -= 15
-            else:
-                signals.append(f"➡️ RSI: {rsi:.1f} - Neutral")
-        
-        # MACD Analysis
-        if macd is not None and macd_signal is not None:
-            if macd > macd_signal:
-                signals.append("📊 MACD: Golden Cross (Bullish)")
-                score += 25
-            else:
-                signals.append("📊 MACD: Death Cross (Bearish)")
-                score -= 25
-        
-        # EMA Trend
-        if ema_20 and ema_50 and current_price:
-            if current_price > ema_20 > ema_50:
-                signals.append("📈 EMA: Strong Uptrend")
-                score += 20
-            elif current_price < ema_20 < ema_50:
-                signals.append("📉 EMA: Strong Downtrend")
-                score -= 20
-            else:
-                signals.append("➡️ EMA: Sideways")
-        
-        # 24hr Price Movement
-        price_change = btc_data['price_change_pct']
-        if price_change >= 5:
-            signals.append(f"🚀 ราคาพุ่ง +{price_change:.1f}% ใน 24hr")
-            score += 15
-        elif price_change <= -5:
-            signals.append(f"📉 ราคาร่วง {price_change:.1f}% ใน 24hr")
-            score -= 15
-        else:
-            signals.append(f"➡️ ราคาเปลี่ยน {price_change:+.1f}% ใน 24hr")
-        
-        logger.info(f"✅ Technical analysis complete. Score: {score}")
-        
-        return {
-            'signals': signals,
-            'score': score,
-            'rsi': rsi,
-            'macd': macd,
-            'macd_signal': macd_signal,
-            'current_price': current_price
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Error analyzing BTC signals: {e}")
-        return None
-
-
-def get_btc_short_term_analysis(btc_ticker_data):
-    """วิเคราะห์การซื้อ-ขายระยะสั้นสำหรับ BTC - รับข้อมูลจากภายนอก"""
-    try:
-        if not btc_ticker_data:
-            logger.error("❌ No BTC data provided for short-term analysis")
-            return None
-        
-        current_price = btc_ticker_data['price']
-        high_24h = btc_ticker_data['high_24h']
-        low_24h = btc_ticker_data['low_24h']
-        change_pct = btc_ticker_data['price_change_pct']
-        
-        # คำนวณ Support และ Resistance
-        support_level = low_24h
-        resistance_level = high_24h
-        mid_level = (high_24h + low_24h) / 2
-        
-        # คำนวณ Distance from High/Low
-        distance_from_high = ((high_24h - current_price) / high_24h) * 100
-        distance_from_low = ((current_price - low_24h) / low_24h) * 100
-        
-        # วิเคราะห์สัญญาณ
-        signals = []
-        score = 0
-        
-        # 1. ตำแหน่งราคาในช่วง 24hr
-        if current_price <= low_24h * 1.02:  # ใกล้ Low
-            signals.append("🟢 ราคาใกล้จุดต่ำสุด 24hr - โอกาสเข้าซื้อ")
-            score += 30
-        elif current_price >= high_24h * 0.98:  # ใกล้ High
-            signals.append("🔴 ราคาใกล้จุดสูงสุด 24hr - ระวังการปรับฐาน")
-            score -= 30
-        elif current_price <= mid_level:
-            signals.append("🟡 ราคาต่ำกว่ากลางช่วง - พิจารณาเข้าซื้อ")
-            score += 15
-        else:
-            signals.append("🟠 ราคาสูงกว่ากลางช่วง - รอ pullback")
-            score -= 15
-        
-        # 2. Momentum (การเปลี่ยนแปลง 24hr)
-        if change_pct <= -5:
-            signals.append(f"💚 ราคาร่วงแรง {change_pct:.1f}% - โอกาสซื้อ Dip")
-            score += 25
-        elif change_pct <= -3:
-            signals.append(f"🟢 ราคาลดลง {change_pct:.1f}% - เริ่มน่าสนใจ")
-            score += 15
-        elif change_pct >= 5:
-            signals.append(f"🔴 ราคาพุ่งแรง {change_pct:+.1f}% - ควร Take Profit")
-            score -= 25
-        elif change_pct >= 3:
-            signals.append(f"🟠 ราคาขึ้นแรง {change_pct:+.1f}% - ระวังกลับตัว")
-            score -= 15
-        
-        # 3. Volatility (ความผันผวน)
-        price_range = high_24h - low_24h
-        volatility_pct = (price_range / low_24h) * 100
-        
-        if volatility_pct >= 5:
-            signals.append(f"⚡ ความผันผวนสูง {volatility_pct:.1f}% - เหมาะเทรดระยะสั้น")
-        elif volatility_pct >= 3:
-            signals.append(f"📊 ความผันผวนปานกลาง {volatility_pct:.1f}% - ตลาดปกติ")
-        else:
-            signals.append(f"😴 ความผันผวนต่ำ {volatility_pct:.1f}% - รอโมเมนตัม")
-        
-        # สรุปคำแนะนำ
-        if score >= 40:
-            action = "🟢 STRONG BUY"
-            entry = f"เข้าซื้อที่: ${current_price:,.2f}"
-            target = f"Target: ${resistance_level:,.2f} (+{((resistance_level-current_price)/current_price*100):.1f}%)"
-            stop_loss = f"Stop Loss: ${support_level:,.2f} (-{((current_price-support_level)/current_price*100):.1f}%)"
-        elif score >= 20:
-            action = "🟢 BUY"
-            entry = f"เข้าซื้อที่: ${current_price:,.2f} หรือรอ pullback"
-            target = f"Target: ${mid_level:,.2f} - ${resistance_level:,.2f}"
-            stop_loss = f"Stop Loss: ${support_level:,.2f}"
-        elif score >= -20:
-            action = "🟡 WAIT"
-            entry = f"รอสัญญาณชัดเจน"
-            target = f"Entry: ใกล้ ${support_level:,.2f}"
-            stop_loss = f"หรือใกล้ ${low_24h * 0.98:,.2f}"
-        else:
-            action = "🔴 SELL/TAKE PROFIT"
-            entry = f"ออกจากตำแหน่งที่: ${current_price:,.2f}"
-            target = f"Re-entry: ${support_level:,.2f} - ${mid_level:,.2f}"
-            stop_loss = f"Stop: ${high_24h * 1.02:,.2f}"
-        
-        logger.info(f"✅ Short-term analysis complete. Score: {score}")
-        
-        return {
-            'signals': signals,
-            'score': score,
-            'action': action,
-            'entry': entry,
-            'target': target,
-            'stop_loss': stop_loss,
-            'support': support_level,
-            'resistance': resistance_level,
-            'current_price': current_price,
-            'distance_from_high': distance_from_high,
-            'distance_from_low': distance_from_low
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Error in short-term analysis: {e}")
-        return None
-
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -580,7 +231,7 @@ def get_stock_analysis(symbol):
         open_price = float(quote.get('open', current))
         
         # สร้างรายงาน
-        report = f"""📊 **{symbol.upper()} Analysis**\n\n"""
+        report = f"📊 **{symbol.upper()} Analysis**\n\n"
         
         if quote.get('name'):
             report += f"🏢 **{quote['name']}**\n\n"
@@ -858,26 +509,311 @@ def get_trading_recommendation(symbol):
         logger.error(f"Error getting recommendation for {symbol}: {e}")
         return None, str(e)
 
+# --- NEW: Menu-based Quick Access Handlers ---
 
-# --- HTTP Health Check Handler (สำหรับป้องกัน Render Sleep) ---
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """แสดงเมนูหลัก - เลือกหมวดหมู่หุ้น"""
+    keyboard = []
+    
+    # สร้างปุ่มตามหมวดหมู่
+    for cat_id, cat_data in PORTFOLIO.items():
+        keyboard.append([
+            InlineKeyboardButton(
+                cat_data["name"], 
+                callback_data=f"cat_{cat_id}"
+            )
+        ])
+    
+    # เพิ่มปุ่มวิเคราะห์ทั้งหมด
+    keyboard.append([
+        InlineKeyboardButton("📊 วิเคราะห์ทั้งหมด", callback_data="analyze_all")
+    ])
+    
+    # เพิ่มปุ่ม Crypto
+    keyboard.append([
+        InlineKeyboardButton("🪙 Bitcoin Analysis", callback_data="btc_full"),
+        InlineKeyboardButton("⚡ BTC Quick", callback_data="btc_quick")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message_text = (
+        "📊 **Quick Access Menu**\n\n"
+        "เลือกหมวดหมู่หุ้นที่ต้องการวิเคราะห์:"
+    )
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
 
-#async def http_health_check(request):
-#    """HTTP health check endpoint for UptimeRobot & Render"""
-#    return web.Response(text="✅ Bot is running!", status=200)
+async def show_category_stocks(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str):
+    """แสดงรายการหุ้นในหมวดหมู่"""
+    query = update.callback_query
+    await query.answer()
+    
+    if category_id not in PORTFOLIO:
+        await query.edit_message_text("❌ ไม่พบหมวดหมู่นี้")
+        return
+    
+    category = PORTFOLIO[category_id]
+    keyboard = []
+    
+    # สร้างปุ่มสำหรับแต่ละหุ้น (2 ปุ่มต่อแถว)
+    stocks = category["stocks"]
+    for i in range(0, len(stocks), 2):
+        row = []
+        for stock in stocks[i:i+2]:
+            row.append(
+                InlineKeyboardButton(
+                    f"📈 {stock}",
+                    callback_data=f"stock_{stock}"
+                )
+            )
+        keyboard.append(row)
+    
+    # ปุ่มวิเคราะห์หมวดหมู่นี้ทั้งหมด
+    keyboard.append([
+        InlineKeyboardButton(
+            f"📊 วิเคราะห์ {category['name']} ทั้งหมด",
+            callback_data=f"cat_analyze_{category_id}"
+        )
+    ])
+    
+    # ปุ่มกลับ
+    keyboard.append([
+        InlineKeyboardButton("◀️ กลับเมนูหลัก", callback_data="back_main")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"{category['name']}\n\nเลือกหุ้นที่ต้องการวิเคราะห์:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
 
-# --- Telegram Handlers ---
+async def analyze_single_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str):
+    """วิเคราะห์หุ้นเดียว"""
+    query = update.callback_query
+    await query.answer()
+    
+    processing = await query.edit_message_text(
+        f"🔍 กำลังวิเคราะห์ {symbol}...\n⏳ กำลังดึงข้อมูล..."
+    )
+    
+    analysis = get_stock_analysis(symbol)
+    
+    # สร้างปุ่มกลับ
+    keyboard = [[
+        InlineKeyboardButton("◀️ กลับ", callback_data="back_main")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if analysis == "no_key":
+        await query.edit_message_text(
+            "⚠️ **ไม่พบ API Key**\n\n"
+            "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    elif analysis:
+        if len(analysis) > 4000:
+            mid_point = analysis.rfind('\n\n', 0, 2000)
+            if mid_point == -1:
+                mid_point = 2000
+            
+            part1 = analysis[:mid_point]
+            part2 = analysis[mid_point:]
+            
+            await query.edit_message_text(part1, parse_mode='Markdown')
+            await query.message.reply_text(
+                part2,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                analysis,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    else:
+        await query.edit_message_text(
+            f"❌ ไม่พบข้อมูลหุ้น {symbol}",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+async def analyze_category(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str):
+    """วิเคราะห์หุ้นทั้งหมดในหมวดหมู่"""
+    query = update.callback_query
+    await query.answer()
+    
+    if category_id not in PORTFOLIO:
+        await query.edit_message_text("❌ ไม่พบหมวดหมู่นี้")
+        return
+    
+    category = PORTFOLIO[category_id]
+    stocks = category["stocks"]
+    
+    processing = await query.edit_message_text(
+        f"🔍 กำลังวิเคราะห์ {category['name']} ({len(stocks)} หุ้น)...\n"
+        f"⏳ กรุณารอสักครู่..."
+    )
+    
+    results = []
+    for symbol in stocks:
+        result, error = get_trading_recommendation(symbol)
+        if result:
+            results.append(result)
+        else:
+            results.append({
+                'symbol': symbol,
+                'recommendation': '❌ ไม่มีข้อมูล',
+                'emoji': '❓',
+                'score': 0,
+                'price': 0,
+                'signals': []
+            })
+    
+    # สร้างรายงาน
+    report = f"📊 **{category['name']} Analysis**\n\n"
+    
+    for r in sorted(results, key=lambda x: x['score'], reverse=True):
+        report += f"{r['emoji']} **{r['symbol']}** - ${r['price']:.2f}\n"
+        report += f"   {r['recommendation']} (Score: {r['score']})\n\n"
+    
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+    
+    # ปุ่มกลับ
+    keyboard = [[
+        InlineKeyboardButton("◀️ กลับเมนูหลัก", callback_data="back_main")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        report,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """จัดการ callback จากปุ่ม"""
+    query = update.callback_query
+    
+    # แยก callback data
+    if query.data == "back_main":
+        await show_main_menu(update, context)
+    
+    elif query.data == "analyze_all":
+        await quick_analysis(update, context)
+    
+    elif query.data == "btc_full":
+        await btc_alert_callback(update, context)
+    
+    elif query.data == "btc_quick":
+        await btc_price_callback(update, context)
+    
+    elif query.data.startswith("cat_analyze_"):
+        category_id = query.data.replace("cat_analyze_", "")
+        await analyze_category(update, context, category_id)
+    
+    elif query.data.startswith("cat_"):
+        category_id = query.data.replace("cat_", "")
+        await show_category_stocks(update, context, category_id)
+    
+    elif query.data.startswith("stock_"):
+        symbol = query.data.replace("stock_", "")
+        await analyze_single_stock(update, context, symbol)
+
+# Bitcoin handlers for callback
+async def btc_alert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bitcoin analysis via callback"""
+    query = update.callback_query
+    await query.answer()
+    
+    processing = await query.edit_message_text(
+        "🔍 กำลังวิเคราะห์ Bitcoin...\n"
+        "⏳ กำลังดึงข้อมูลจาก Bitkub..."
+    )
+    
+    try:
+        bitkub_url = "https://api.bitkub.com/api/market/ticker"
+        params = {"sym": "THB_BTC"}
+        
+        response = requests.get(bitkub_url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'THB_BTC' not in data:
+            raise Exception("No THB_BTC data")
+        
+        btc_data = data['THB_BTC']
+        price_thb = float(btc_data['last'])
+        high_thb = float(btc_data['high24hr'])
+        low_thb = float(btc_data['low24hr'])
+        change_pct = float(btc_data.get('percentChange', 0))
+        
+        if change_pct == 0 and high_thb > 0:
+            avg_price = (high_thb + low_thb) / 2
+            change_pct = ((price_thb - avg_price) / avg_price) * 100
+        
+        emoji = "🟢" if change_pct >= 0 else "🔴"
+        
+        report = "🪙 **Bitcoin Analysis**\n\n"
+        report += f"💰 **ราคา:** ฿{price_thb:,.2f}\n"
+        report += f"{emoji} **24hr:** {change_pct:+.2f}%\n"
+        report += f"📊 **ช่วง:** ฿{low_thb:,.2f} - ฿{high_thb:,.2f}\n\n"
+        report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+        
+        keyboard = [[
+            InlineKeyboardButton("◀️ กลับ", callback_data="back_main")
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            report,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        keyboard = [[
+            InlineKeyboardButton("◀️ กลับ", callback_data="back_main")
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "❌ ไม่สามารถดึงข้อมูล Bitcoin ได้",
+            reply_markup=reply_markup
+        )
+
+async def btc_price_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Quick BTC price via callback"""
+    await btc_alert_callback(update, context)
+
+# --- Original Handlers (คงเดิม) ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
 
 💡 **วิธีใช้งาน:**
-• พิมพ์ชื่อหุ้น เช่น: NVDA,NFLX,AMZN,GOOGL,RKLB,V,MSFT,IVV,AVGO,META
+• /menu - เมนูเลือกหุ้นแบบรวดเร็ว ⚡ (แนะนำ!)
+• พิมพ์ชื่อหุ้น เช่น: NVDA, NFLX, AMZN
 • /help - ดูคำแนะนำ
 • /popular - ดูหุ้นยอดนิยม
-• /a - คำสั่งด่วน
+• /a - วิเคราะห์ทั้งหมด
 • /btc - วิเคราะห์ BTC แบบละเอียด 🪙
 • /b - ดูราคา BTC แบบรวดเร็ว ⚡
-• /health - สถานะbot 
 
 ✨ วิเคราะห์ด้วย:
 • RSI, MACD, EMA, Bollinger Bands
@@ -902,17 +838,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 พิมพ์: TSLA
 
 **คำสั่ง:**
+/menu - เมนูเลือกหุ้นแบบรวดเร็ว
 /popular - ดูหุ้นยอดนิยม
 
 **คำสั่ง Crypto:**
 /btc - วิเคราะห์ Bitcoin แบบครบวงจร
 /b หรือ /btcprice - ดูราคา BTC แบบรวดเร็ว
-
-**ข้อมูลที่ได้:**
-• ราคา Real-time จาก Binance
-• Fear & Greed Index
-• สัญญาณทางเทคนิค (RSI, MACD, EMA)
-• คำแนะนำซื้อ-ขาย
 
 ⚠️ รองรับหุ้นอเมริกา และบางหุ้นนานาชาติ
 ⚠️ ข้อมูลเพื่อการศึกษาเท่านั้น"""
@@ -921,25 +852,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def popular_stocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     popular = """📈 หุ้นยอดนิยม
 
-เทคโนโลยี:AAPL, MSFT, GOOGL, META, NVDA, TSLA, AMZN, AVGO, CRM, ADBE, ORCL, TSM, QCOM, ASML, RKLB 
+เทคโนโลยี: AAPL, MSFT, GOOGL, META, NVDA, TSLA, AMZN, AVGO
 
-การเงิน:JPM, BAC, V, MA, GS, MS, BRK.B, BLK, WFC, AXP, PYPL, SCHW
+การเงิน: JPM, BAC, V, MA, GS, MS
 
-พลังงาน:XOM, CVX, COP, SLB, EOG, MPC, PSX, VLO, HES
+พลังงาน: XOM, CVX, COP
 
-อุปโภคบริโภค:WMT, KO, PG, MCD, NKE, COST, PEP, HD, SBUX, PM, TGT, LOW
+อุปโภคบริโภค: WMT, KO, PG, MCD, NKE
 
-สุขภาพ:JNJ, UNH, PFE, ABBV, LLY, NVO, ISRG, AMGN, MDT, BMY
+สุขภาพ: JNJ, UNH, PFE, ABBV
 
-อุตสาหกรรมและการขนส่ง:GE, CAT, LMT, HON, UPS, RTX, BA, DE, MMM, FEDEX
-
-บริการสื่อสารและบันเทิง:NFLX, DIS, TMUS, CMCSA, VZ, T, CHTR
-
-วัสดุและอุปกรณ์:LIN, APD, FCX, SHW, ECL, NEM
-
-สาธารณูปโภค:NEE, DUKE, SO, D, AEP, EXC
-
-อสังหาริมทรัพย์ (REITs):AMT, PLD, EQIX, CCI, SPG, O"""
+💡 Tip: ใช้ /menu เพื่อเข้าถึงหุ้นในพอร์ตอย่างรวดเร็ว!"""
     await update.message.reply_text(popular, parse_mode='Markdown')
 
 async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -951,7 +874,10 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(user_input) < 1 or len(user_input) > 6 or not user_input.isalpha(): 
         return
     
-    processing = await update.message.reply_text(f"🔍 กำลังวิเคราะห์ {user_input}...\n⏳ กำลังดึงข้อมูล RSI, MACD, EMA, Bollinger Bands, Valuation...")
+    processing = await update.message.reply_text(
+        f"🔍 กำลังวิเคราะห์ {user_input}...\n"
+        f"⏳ กำลังดึงข้อมูล RSI, MACD, EMA, Bollinger Bands, Valuation..."
+    )
     analysis = get_stock_analysis(user_input)
     
     if analysis == "no_key":
@@ -962,9 +888,7 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     elif analysis:
-        # ตรวจสอบความยาวข้อความ (Telegram limit 4096)
         if len(analysis) > 4000:
-            # แบ่งข้อความออกเป็น 2 ส่วน
             mid_point = analysis.rfind('\n\n', 0, 2000)
             if mid_point == -1:
                 mid_point = 2000
@@ -984,16 +908,24 @@ async def analyze_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def quick_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """วิเคราะห์ด่วนหุ้นที่ถืออยู่"""
-    portfolio = ["NVDA", "NFLX", "AMZN", "GOOGL", "RKLB", "V", "MSFT", "IVV", "AVGO", "META"]
+    """วิเคราะห์ด่วนหุ้นทั้งหมดในพอร์ต"""
     
-    processing = await update.message.reply_text(
-        f"🔍 กำลังวิเคราะห์ {len(portfolio)} หุ้นในพอร์ต...\n"
-        f"⏳ กรุณารอสักครู่..."
-    )
+    # จัดการทั้ง message และ callback query
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        processing = await query.edit_message_text(
+            f"🔍 กำลังวิเคราะห์ {len(ALL_STOCKS)} หุ้นในพอร์ต...\n"
+            f"⏳ กรุณารอสักครู่..."
+        )
+    else:
+        processing = await update.message.reply_text(
+            f"🔍 กำลังวิเคราะห์ {len(ALL_STOCKS)} หุ้นในพอร์ต...\n"
+            f"⏳ กรุณารอสักครู่..."
+        )
     
     results = []
-    for symbol in portfolio:
+    for symbol in ALL_STOCKS:
         result, error = get_trading_recommendation(symbol)
         if result:
             results.append(result)
@@ -1054,35 +986,29 @@ async def quick_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report += f"• Hold: {len(hold)} หุ้น\n"
     report += f"• Reduce/Sell: {len(reduce) + len(sell)} หุ้น\n\n"
     
-    # แนะนำการดำเนินการ
-    action_count = len(strong_buy) + len(accumulate)
-    if action_count >= 5:
-        report += "💡 **คำแนะนำ:** มีหลายหุ้นน่าสนใจ - พิจารณาเพิ่มสัดส่วนในหุ้นที่ Strong Buy\n"
-    elif action_count >= 3:
-        report += "💡 **คำแนะนำ:** มีบางหุ้นน่าสนใจ - Accumulate ตามจังหวะ\n"
-    elif len(sell) + len(reduce) >= 4:
-        report += "⚠️ **คำแนะนำ:** พอร์ตมีความเสี่ยง - พิจารณา Rebalance\n"
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+    
+    # ปุ่มกลับ (ถ้าเป็น callback)
+    if update.callback_query:
+        keyboard = [[
+            InlineKeyboardButton("◀️ กลับเมนูหลัก", callback_data="back_main")
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await processing.edit_text(report, reply_markup=reply_markup, parse_mode='Markdown')
     else:
-        report += "✅ **คำแนะนำ:** พอร์ตสมดุล - Hold และติดตามต่อ\n"
-    
-    report += f"\n⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
-    report += f"\n\n💬 พิมพ์ชื่อหุ้นเพื่อดูรายละเอียดเพิ่มเติม"
-    
-    await processing.edit_text(report, parse_mode='Markdown')
+        await processing.edit_text(report, parse_mode='Markdown')
 
 async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ระบบแจ้งเตือน BTC แบบครบวงจร - ใช้ Bitkub"""
+    """BTC analysis command"""
     processing = await update.message.reply_text(
         "🔍 กำลังวิเคราะห์ Bitcoin...\n"
         "⏳ กำลังดึงข้อมูลจาก Bitkub..."
     )
     
     try:
-        # ดึงข้อมูลจาก Bitkub (เร็วที่สุด)
         bitkub_url = "https://api.bitkub.com/api/market/ticker"
         params = {"sym": "THB_BTC"}
         
-        logger.info("🔍 Fetching BTC/THB from Bitkub...")
         response = requests.get(bitkub_url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
@@ -1091,340 +1017,32 @@ async def btc_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise Exception("No THB_BTC data")
         
         btc_data = data['THB_BTC']
-        
         price_thb = float(btc_data['last'])
         high_thb = float(btc_data['high24hr'])
         low_thb = float(btc_data['low24hr'])
         change_pct = float(btc_data.get('percentChange', 0))
         
-        # ถ้า percentChange = 0 ให้คำนวณเอง
         if change_pct == 0 and high_thb > 0:
             avg_price = (high_thb + low_thb) / 2
             change_pct = ((price_thb - avg_price) / avg_price) * 100
         
-        volume_btc = float(btc_data.get('baseVolume', 0))
-        
-        logger.info(f"✅ Bitkub Data: ฿{price_thb:,.2f}, Change: {change_pct:+.2f}%")
-        
-        # สร้าง ticker สำหรับวิเคราะห์
-        btc_ticker = {
-            'price': price_thb,
-            'high_24h': high_thb,
-            'low_24h': low_thb,
-            'price_change_pct': change_pct
-        }
-        
-        # ดึง Fear & Greed (ถ้าเร็ว ไม่เกิน 3 วินาที)
-        fear_greed = None
-        try:
-            fg_response = requests.get(
-                "https://api.alternative.me/fng/",
-                params={"limit": 1},
-                timeout=3
-            )
-            if fg_response.status_code == 200:
-                fg_data = fg_response.json()
-                if fg_data.get('data') and len(fg_data['data']) > 0:
-                    fear_greed = {
-                        'value': int(fg_data['data'][0]['value']),
-                        'classification': fg_data['data'][0]['value_classification']
-                    }
-                    logger.info(f"✅ Fear & Greed: {fear_greed['value']}")
-        except:
-            logger.warning("⚠️ Fear & Greed timeout - skipping")
-        
-        # วิเคราะห์สัญญาณ (ใช้ข้อมูลที่มี ไม่เรียก API เพิ่ม)
-        technical = analyze_btc_simple(btc_ticker)
-        
-        # สร้างรายงาน
-        report = "🪙 **Bitcoin Analysis Report**\n\n"
-        
-        # ส่วนที่ 1: ราคา
-        emoji = "🟢" if change_pct >= 0 else "🔴"
-        report += f"💰 **ราคาปัจจุบัน:** ฿{price_thb:,.2f}\n"
-        report += f"{emoji} **24hr Change:** {change_pct:+.2f}%\n"
-        
-        if volume_btc > 0:
-            report += f"📊 **Volume 24hr:** {volume_btc:,.2f} BTC\n"
-        
-        report += "\n"
-        
-        # ส่วนที่ 2: ช่วงราคา
-        report += f"📊 **ช่วงราคา 24hr:**\n"
-        report += f"• สูงสุด: ฿{high_thb:,.2f}\n"
-        report += f"• ต่ำสุด: ฿{low_thb:,.2f}\n\n"
-        
-        # ส่วนที่ 3: Fear & Greed
-        if fear_greed:
-            fg_value = fear_greed['value']
-            fg_class = fear_greed['classification']
-            
-            report += f"🎭 **Fear & Greed Index:**\n"
-            
-            if fg_value <= 20:
-                report += f"🟢 {fg_value} - {fg_class}\n"
-                report += f"💡 **Extreme Fear** - เวลาที่ดีในการซื้อ!\n\n"
-            elif fg_value <= 40:
-                report += f"🟡 {fg_value} - {fg_class}\n"
-                report += f"💡 ตลาดกลัว - พิจารณาซื้อเพิ่ม\n\n"
-            elif fg_value <= 60:
-                report += f"⚪ {fg_value} - {fg_class}\n"
-                report += f"💡 ตลาดปกติ - รอสัญญาณชัดเจน\n\n"
-            elif fg_value <= 80:
-                report += f"🟠 {fg_value} - {fg_class}\n"
-                report += f"⚠️ ตลาดโลภ - ระวังราคาปรับฐาน\n\n"
-            else:
-                report += f"🔴 {fg_value} - {fg_class}\n"
-                report += f"⚠️ **Extreme Greed** - ควรระมัดระวัง!\n\n"
-        
-        # ส่วนที่ 4: สัญญาณทางเทคนิค
-        if technical:
-            report += f"📈 **สัญญาณทางเทคนิค:**\n"
-            for signal in technical['signals']:
-                report += f"• {signal}\n"
-            report += f"\n"
-            
-            # สรุปคะแนน
-            score = technical['score']
-            report += f"🎯 **คะแนนรวม:** {score}/100\n"
-            
-            if score >= 50:
-                report += f"🟢 **คำแนะนำ: STRONG BUY**\n"
-                report += f"💡 มีสัญญาณ Bullish หลายตัว\n\n"
-            elif score >= 20:
-                report += f"🟢 **คำแนะนำ: ACCUMULATE**\n"
-                report += f"💡 มีสัญญาณเชิงบวก - ซื้อค่อยๆ เพิ่ม\n\n"
-            elif score >= -20:
-                report += f"🟡 **คำแนะนำ: HOLD**\n"
-                report += f"💡 สัญญาณไม่ชัดเจน - รอดูก่อน\n\n"
-            elif score >= -50:
-                report += f"🔴 **คำแนะนำ: REDUCE**\n"
-                report += f"⚠️ มีสัญญาณ Bearish\n\n"
-            else:
-                report += f"🔴 **คำแนะนำ: SELL**\n"
-                report += f"⚠️ สัญญาณ Bearish แข็งแกร่ง\n\n"
-        
-        # ส่วนที่ 5: แจ้งเตือนพิเศษ
-        alerts = []
-        
-        if abs(change_pct) >= 5:
-            alerts.append(f"⚡ ราคาเคลื่อนไหวมาก {abs(change_pct):.1f}%")
-        
-        if fear_greed and (fear_greed['value'] <= 20 or fear_greed['value'] >= 80):
-            alerts.append(f"🎭 Fear & Greed ที่ระดับ Extreme")
-        
-        if alerts:
-            report += f"🔔 **Alert พิเศษ:**\n"
-            for alert in alerts:
-                report += f"• {alert}\n"
-            report += f"\n"
-        
-        # Footer
-        report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}\n"
-        report += f"🇹🇭 Data: Bitkub Exchange\n"
-        report += f"💬 พิมพ์ /b เพื่อดูราคาอย่างรวดเร็ว"
-        
-        await processing.edit_text(report, parse_mode='Markdown')
-        
-    except requests.exceptions.Timeout:
-        logger.error("❌ Bitkub API Timeout")
-        await processing.edit_text(
-            "❌ การเชื่อมต่อหมดเวลา\n\n"
-            "กรุณาลองใหม่อีกครั้ง"
-        )
-    except Exception as e:
-        logger.error(f"❌ Error in btc_alert: {e}")
-        await processing.edit_text(
-            "❌ ไม่สามารถดึงข้อมูล Bitcoin ได้\n\n"
-            f"กรุณาลองใหม่อีกครั้ง"
-        )
-
-
-def analyze_btc_simple(btc_ticker):
-    """วิเคราะห์ BTC แบบง่าย ไม่เรียก API เพิ่ม"""
-    try:
-        current_price = btc_ticker['price']
-        high_24h = btc_ticker['high_24h']
-        low_24h = btc_ticker['low_24h']
-        change_pct = btc_ticker['price_change_pct']
-        
-        signals = []
-        score = 0
-        
-        # 1. ตำแหน่งราคา
-        price_position = (current_price - low_24h) / (high_24h - low_24h) * 100
-        
-        if price_position <= 20:
-            signals.append("🟢 ราคาใกล้จุดต่ำสุด 24hr - โอกาสเข้าซื้อ")
-            score += 30
-        elif price_position <= 40:
-            signals.append("🟡 ราคาค่อนข้างต่ำ - เริ่มน่าสนใจ")
-            score += 15
-        elif price_position >= 80:
-            signals.append("🔴 ราคาใกล้จุดสูงสุด 24hr - ระวังการปรับฐาน")
-            score -= 30
-        elif price_position >= 60:
-            signals.append("🟠 ราคาค่อนข้างสูง - รอ pullback")
-            score -= 15
-        else:
-            signals.append("➡️ ราคาอยู่กลางช่วง - Neutral")
-        
-        # 2. Momentum
-        if change_pct <= -5:
-            signals.append(f"💚 ราคาร่วงแรง {change_pct:.1f}% - โอกาสซื้อ Dip")
-            score += 25
-        elif change_pct <= -3:
-            signals.append(f"🟢 ราคาลดลง {change_pct:.1f}% - เริ่มน่าสนใจ")
-            score += 15
-        elif change_pct >= 5:
-            signals.append(f"🔴 ราคาพุ่งแรง {change_pct:+.1f}% - ควร Take Profit")
-            score -= 25
-        elif change_pct >= 3:
-            signals.append(f"🟠 ราคาขึ้นแรง {change_pct:+.1f}% - ระวังกลับตัว")
-            score -= 15
-        else:
-            signals.append(f"➡️ ราคาเปลี่ยน {change_pct:+.1f}% ใน 24hr")
-        
-        # 3. Volatility
-        price_range = high_24h - low_24h
-        volatility_pct = (price_range / low_24h) * 100
-        
-        if volatility_pct >= 5:
-            signals.append(f"⚡ ความผันผวนสูง {volatility_pct:.1f}% - เหมาะเทรดระยะสั้น")
-        elif volatility_pct >= 3:
-            signals.append(f"📊 ความผันผวนปานกลาง {volatility_pct:.1f}% - ตลาดปกติ")
-        else:
-            signals.append(f"😴 ความผันผวนต่ำ {volatility_pct:.1f}% - รอโมเมนตัม")
-        
-        logger.info(f"✅ Simple analysis complete. Score: {score}")
-        
-        return {
-            'signals': signals,
-            'score': score,
-            'current_price': current_price
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Error in simple analysis: {e}")
-        return None
-
-async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ดูราคา BTC/THB จาก Bitkub พร้อมวิเคราะห์ระยะสั้น"""
-    
-    processing = await update.message.reply_text("🔍 กำลังดึงข้อมูล BTC/THB จาก Bitkub...")
-    
-    try:
-        # ดึงข้อมูลจาก Bitkub API
-        bitkub_url = "https://api.bitkub.com/api/market/ticker"
-        params = {"sym": "THB_BTC"}
-        
-        logger.info("🔍 Fetching BTC/THB from Bitkub...")
-        response = requests.get(bitkub_url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if 'THB_BTC' not in data:
-            raise Exception("No THB_BTC data in response")
-        
-        btc_data = data['THB_BTC']
-        
-        # ดึงข้อมูลที่จำเป็น
-        price_thb = float(btc_data['last'])
-        high_thb = float(btc_data['high24hr'])
-        low_thb = float(btc_data['low24hr'])
-        
-        # คำนวณ % change
-        prev_close = float(btc_data.get('percentChange', 0))
-        change_pct = prev_close
-        
-        # ถ้าไม่มี percentChange ให้คำนวณจาก high/low
-        if change_pct == 0 and high_thb > 0:
-            avg_price = (high_thb + low_thb) / 2
-            change_pct = ((price_thb - avg_price) / avg_price) * 100
-        
-        logger.info(f"✅ Bitkub BTC/THB: ฿{price_thb:,.2f}, Change: {change_pct:+.2f}%")
-        
-        # สร้าง ticker data สำหรับการวิเคราะห์
-        btc_ticker_thb = {
-            'price': price_thb,
-            'high_24h': high_thb,
-            'low_24h': low_thb,
-            'price_change_pct': change_pct
-        }
-        
-        # ใช้ข้อมูล THB วิเคราะห์
-        short_term = get_btc_short_term_analysis(btc_ticker_thb)
-        
         emoji = "🟢" if change_pct >= 0 else "🔴"
         
-        # เวลาที่ดึงข้อมูล
-        fetch_time = datetime.now().strftime('%H:%M:%S')
-        
-        report = f"🪙 **Bitcoin/THB Quick Analysis**\n\n"
-        
-        # ส่วนที่ 1: ข้อมูลราคา
+        report = "🪙 **Bitcoin Analysis**\n\n"
         report += f"💰 **ราคา:** ฿{price_thb:,.2f}\n"
         report += f"{emoji} **24hr:** {change_pct:+.2f}%\n"
-        report += f"📊 **ช่วง:** ฿{low_thb:,.2f} - ฿{high_thb:,.2f}\n"
-        
-        # เพิ่มข้อมูล Volume ถ้ามี
-        if 'baseVolume' in btc_data:
-            volume_btc = float(btc_data['baseVolume'])
-            report += f"📈 **Volume:** {volume_btc:.2f} BTC\n"
-        
-        report += f"\n"
-        
-        # ส่วนที่ 2: การวิเคราะห์ระยะสั้น
-        if short_term:
-            report += f"📈 **Short-Term Analysis:**\n\n"
-            
-            # คำแนะนำหลัก
-            report += f"{short_term['action']}\n"
-            report += f"🎯 {short_term['entry']}\n"
-            report += f"🏁 {short_term['target']}\n"
-            report += f"🛑 {short_term['stop_loss']}\n\n"
-            
-            # Support & Resistance
-            report += f"📊 **Levels:**\n"
-            report += f"• Resistance: ฿{short_term['resistance']:,.2f}\n"
-            report += f"• Support: ฿{short_term['support']:,.2f}\n"
-            report += f"• ห่างจาก High: {short_term['distance_from_high']:.1f}%\n"
-            report += f"• ห่างจาก Low: {short_term['distance_from_low']:.1f}%\n\n"
-            
-            # สัญญาณ
-            report += f"🔔 **สัญญาณ:**\n"
-            for signal in short_term['signals'][:3]:  # แสดงแค่ 3 สัญญาณแรก
-                report += f"• {signal}\n"
-            
-            report += f"\n"
-        
-        # Footer
-        report += f"⏰ **อัพเดท:** {fetch_time}\n"
-        report += f"🇹🇭 **Source:** Bitkub Exchange\n"
-        report += f"\n💬 พิมพ์ /btc เพื่อดูการวิเคราะห์แบบเต็ม"
+        report += f"📊 **ช่วง:** ฿{low_thb:,.2f} - ฿{high_thb:,.2f}\n\n"
+        report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
         
         await processing.edit_text(report, parse_mode='Markdown')
         
-    except requests.exceptions.Timeout:
-        logger.error("❌ Bitkub API Timeout")
-        await processing.edit_text(
-            "❌ Bitkub API ตอบสนองช้าเกินไป\n\n"
-            "กรุณาลองใหม่อีกครั้ง"
-        )
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Bitkub API Error: {e}")
-        await processing.edit_text(
-            "❌ ไม่สามารถเชื่อมต่อ Bitkub ได้\n\n"
-            "กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"
-        )
     except Exception as e:
-        logger.error(f"❌ Error in btc_price: {e}")
-        await processing.edit_text(
-            "❌ เกิดข้อผิดพลาดในการดึงข้อมูล\n\n"
-            f"รายละเอียด: {str(e)}"
-        )
+        await processing.edit_text("❌ ไม่สามารถดึงข้อมูล Bitcoin ได้")
 
-# Health check handler
+async def btc_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Quick BTC price"""
+    await btc_alert(update, context)
+
 async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /health command"""
     await update.message.reply_text("✅ Bot is running!")
@@ -1432,24 +1050,30 @@ async def health_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
-
-
-
-
 # --- Main ---
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("popular", popular_stocks))
+    application.add_handler(CommandHandler("menu", show_main_menu))  # NEW
+    application.add_handler(CommandHandler("m", show_main_menu))  # Shortcut
     application.add_handler(CommandHandler("a", quick_analysis))
     application.add_handler(CommandHandler("btc", btc_alert))
     application.add_handler(CommandHandler("btcprice", btc_price))
-    application.add_handler(CommandHandler("b", btc_price))  # คำสั่งลัด
+    application.add_handler(CommandHandler("b", btc_price))
     application.add_handler(CommandHandler("health", health_check))
+    
+    # Callback handler for buttons
+    application.add_handler(CallbackQueryHandler(button_callback))  # NEW
+    
+    # Message handler
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
+    
+    # Error handler
     application.add_error_handler(error_handler)
     
     if WEBHOOK_URL and "onrender.com" in WEBHOOK_URL:
