@@ -35,6 +35,8 @@ class RateLimiter:
 
 # สร้าง rate limiter สำหรับแต่ละ API
 twelve_data_limiter = RateLimiter(max_calls=6, period=60)  # ปลอดภัย: 6 calls/min
+massive_limiter = RateLimiter(max_calls=60, period=60)  # 60 calls/min
+
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -48,6 +50,8 @@ TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "NM9JUC6IIMTZCQIA")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+MASSIVE_API_KEY = os.environ.get("MASSIVE_API_KEY", "0PYpBi0FWtRGox1nWfHkotKSBhTepRNU")
+
 
 # --- Portfolio Configuration ---
 PORTFOLIO = {
@@ -191,6 +195,123 @@ def get_bbands(symbol):
         return None, None
     except:
         return None, None
+
+# ========================================
+# ฟังก์ชันใหม่: ดึงข้อมูลจาก Massive.com
+# ========================================
+
+def get_massive_quote(symbol):
+    """ดึงข้อมูลหุ้นจาก Massive.com"""
+    try:
+        massive_limiter.wait_if_needed()
+        
+        url = f"https://api.massive.com/v1/stock/quote/{symbol}"
+        headers = {
+            "Authorization": f"Bearer {MASSIVE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"✅ Massive quote data for {symbol}: {data}")
+            return data
+        else:
+            logger.error(f"❌ Massive API error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive quote: {e}")
+        return None
+
+def get_massive_fundamentals(symbol):
+    """ดึงข้อมูล Fundamental จาก Massive.com"""
+    try:
+        massive_limiter.wait_if_needed()
+        
+        url = f"https://api.massive.com/v1/stock/fundamentals/{symbol}"
+        headers = {
+            "Authorization": f"Bearer {MASSIVE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"📊 Massive fundamentals for {symbol}: {data}")
+            
+            # แปลงข้อมูลให้ตรงกับโครงสร้างเดิม
+            return {
+                'pe_ratio': data.get('peRatio'),
+                'pb_ratio': data.get('pbRatio'),
+                'debt_to_equity': data.get('debtToEquity'),
+                'eps': data.get('eps'),
+                'roe': data.get('roe'),
+                'profit_margin': data.get('profitMargin'),
+                'operating_margin': data.get('operatingMargin'),
+                'dividend_yield': data.get('dividendYield'),
+                'beta': data.get('beta'),
+                'revenue_per_share': data.get('revenuePerShare'),
+                'quarterly_earnings_growth': data.get('earningsGrowthYoY'),
+                'quarterly_revenue_growth': data.get('revenueGrowthYoY'),
+                'book_value': data.get('bookValue'),
+                'ebitda': data.get('ebitda'),
+                'pe_ratio_forward': data.get('forwardPE'),
+                'peg_ratio': data.get('pegRatio'),
+                'market_cap': data.get('marketCap')
+            }
+        else:
+            logger.warning(f"⚠️ Massive fundamentals API error {response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive fundamentals: {e}")
+        return None
+
+def get_massive_earnings(symbol):
+    """ดึงข้อมูล Earnings จาก Massive.com"""
+    try:
+        massive_limiter.wait_if_needed()
+        
+        url = f"https://api.massive.com/v1/stock/earnings/{symbol}"
+        headers = {
+            "Authorization": f"Bearer {MASSIVE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if not data or len(data) < 2:
+                return None
+            
+            current = data[0]
+            previous = data[1]
+            
+            current_eps = current.get('eps', 0)
+            previous_eps = previous.get('eps', 0)
+            
+            earnings_growth = None
+            if previous_eps != 0:
+                earnings_growth = ((current_eps - previous_eps) / abs(previous_eps)) * 100
+            
+            return {
+                'current_eps': current_eps,
+                'previous_eps': previous_eps,
+                'earnings_growth_yoy': earnings_growth,
+                'revenue': current.get('revenue'),
+                'revenue_growth': current.get('revenueGrowth')
+            }
+        else:
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching Massive earnings: {e}")
+        return None
 
 def get_analyst_recommendations(symbol):
     """ดึงคำแนะนำจากนักวิเคราะห์ (จาก Finnhub)"""
@@ -365,17 +486,29 @@ def get_earnings_data(symbol):
 
 
 def get_stock_analysis(symbol):
-    """วิเคราะห์หุ้นแบบครบถ้วน"""
+    """วิเคราะห์หุ้นแบบครบถ้วน (ใช้ Massive API)"""
     try:
         if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
             return "no_key"
         
         logger.info(f"🔄 Analyzing {symbol}...")
         
-        # ดึงข้อมูลทั้งหมด (เพิ่ม error handling)
+        # ดึงข้อมูลราคาจาก TwelveData (หรือ Massive)
         quote = get_quote(symbol)
         if not quote or 'close' not in quote:
-            return None
+            # ลองใช้ Massive แทน
+            massive_quote = get_massive_quote(symbol)
+            if massive_quote:
+                quote = {
+                    'close': massive_quote.get('price'),
+                    'previous_close': massive_quote.get('previousClose'),
+                    'high': massive_quote.get('high'),
+                    'low': massive_quote.get('low'),
+                    'open': massive_quote.get('open'),
+                    'name': massive_quote.get('name')
+                }
+            else:
+                return None
         
         # ดึงข้อมูลเทคนิคคอล - ถ้า error ให้เป็น None แทนที่จะหยุด
         try:
@@ -420,12 +553,17 @@ def get_stock_analysis(symbol):
         except:
             price_target = None
             logger.warning(f"⚠️ Cannot get price target for {symbol}")
-            
+
+     # ดึงข้อมูล Fundamental จาก Massive (แทน Alpha Vantage)
         try:
-            fundamental = get_fundamental_data(symbol)
+            fundamental = get_massive_fundamentals(symbol)
+            if not fundamental:
+                # Fallback to Alpha Vantage
+                fundamental = get_fundamental_data(symbol)
         except:
             fundamental = None
             logger.warning(f"⚠️ Cannot get fundamental data for {symbol}")
+         
             
         try:
             cash_flow = get_cash_flow_data(symbol)
@@ -433,8 +571,12 @@ def get_stock_analysis(symbol):
             cash_flow = None
             logger.warning(f"⚠️ Cannot get cash flow for {symbol}")
             
+        # ดึงข้อมูล Earnings จาก Massive
         try:
-            earnings = get_earnings_data(symbol)
+            earnings = get_massive_earnings(symbol)
+            if not earnings:
+                # Fallback to Alpha Vantage
+                earnings = get_earnings_data(symbol)
         except:
             earnings = None
             logger.warning(f"⚠️ Cannot get earnings for {symbol}")
@@ -505,9 +647,16 @@ def get_stock_analysis(symbol):
                 report += f"🚨 Downside: {upside_pct:.1f}%\n"
                 report += f"⛔ ราคาแพงเกินไป - ควรระมัดระวัง\n\n"
 
-# ============ Fundamental Analysis ============
+
+
+             # ============ Fundamental Analysis ============
         if fundamental:
             report += f"📊 **Fundamental Analysis:**\n"
+            
+            # Market Cap
+            if fundamental.get('market_cap'):
+                market_cap_b = fundamental['market_cap'] / 1_000_000_000
+                report += f"• Market Cap: ${market_cap_b:.2f}B\n"
             
             # Valuation Metrics
             if fundamental.get('pe_ratio'):
@@ -550,7 +699,9 @@ def get_stock_analysis(symbol):
             
             # Profitability
             if fundamental.get('roe'):
-                roe = fundamental['roe'] * 100
+                roe = fundamental['roe']
+                if roe < 1:  # ถ้าเป็นทศนิยม (0.15 = 15%)
+                    roe = roe * 100
                 report += f"• ROE: {roe:.1f}%"
                 if roe >= 15:
                     report += " 💪 (แข็งแกร่ง)\n"
@@ -560,7 +711,9 @@ def get_stock_analysis(symbol):
                     report += " ⚠️ (อ่อนแอ)\n"
             
             if fundamental.get('profit_margin'):
-                margin = fundamental['profit_margin'] * 100
+                margin = fundamental['profit_margin']
+                if margin < 1:  # ถ้าเป็นทศนิยม
+                    margin = margin * 100
                 report += f"• Profit Margin: {margin:.1f}%"
                 if margin >= 20:
                     report += " 💪\n"
@@ -570,7 +723,9 @@ def get_stock_analysis(symbol):
                     report += "\n"
             
             if fundamental.get('operating_margin'):
-                op_margin = fundamental['operating_margin'] * 100
+                op_margin = fundamental['operating_margin']
+                if op_margin < 1:
+                    op_margin = op_margin * 100
                 report += f"• Operating Margin: {op_margin:.1f}%\n"
             
             # Financial Health
@@ -586,7 +741,9 @@ def get_stock_analysis(symbol):
             
             # Growth
             if fundamental.get('quarterly_earnings_growth'):
-                qeg = fundamental['quarterly_earnings_growth'] * 100
+                qeg = fundamental['quarterly_earnings_growth']
+                if qeg < 1:
+                    qeg = qeg * 100
                 report += f"• Quarterly Earnings Growth: {qeg:+.1f}%"
                 if qeg >= 20:
                     report += " 🚀\n"
@@ -598,12 +755,16 @@ def get_stock_analysis(symbol):
                     report += " 📉\n"
             
             if fundamental.get('quarterly_revenue_growth'):
-                qrg = fundamental['quarterly_revenue_growth'] * 100
+                qrg = fundamental['quarterly_revenue_growth']
+                if qrg < 1:
+                    qrg = qrg * 100
                 report += f"• Quarterly Revenue Growth: {qrg:+.1f}%\n"
             
             # Others
             if fundamental.get('dividend_yield'):
-                div = fundamental['dividend_yield'] * 100
+                div = fundamental['dividend_yield']
+                if div < 1:
+                    div = div * 100
                 if div > 0:
                     report += f"• Dividend Yield: {div:.2f}%\n"
             
@@ -618,7 +779,7 @@ def get_stock_analysis(symbol):
                     report += "\n"
             
             report += "\n"
-        
+          
         # ============ Cash Flow Analysis ============
         if cash_flow:
             report += f"💰 **Cash Flow Analysis:**\n"
@@ -654,7 +815,9 @@ def get_stock_analysis(symbol):
             report += "\n"
         
         # ============ Earnings Growth ============
-        if earnings and earnings.get('earnings_growth_yoy') is not None:
+    
+
+       if earnings and earnings.get('earnings_growth_yoy') is not None:
             growth = earnings['earnings_growth_yoy']
             report += f"📈 **Earnings Growth (YoY):** {growth:+.1f}%"
             if growth >= 20:
@@ -670,7 +833,11 @@ def get_stock_analysis(symbol):
                 report += f"• Current EPS: ${earnings['current_eps']:.2f}\n"
                 report += f"• Previous EPS: ${earnings['previous_eps']:.2f}\n"
             
-            report += "\n" 
+            if earnings.get('revenue'):
+                revenue_b = earnings['revenue'] / 1_000_000_000
+                report += f"• Revenue: ${revenue_b:.2f}B\n"
+            
+            report += "\n"
     #-------------------
         # RSI Analysis
         if rsi:
