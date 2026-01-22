@@ -188,7 +188,6 @@ def translate_news_batch(news_list):
     """แปลข่าวทั้งหมดในคราวเดียวด้วย Deep Translator"""
     try:
         from deep_translator import GoogleTranslator
-        translator = GoogleTranslator(source='en', target='th')
         
         for news in news_list:
             headline = news.get('headline', '')
@@ -197,28 +196,39 @@ def translate_news_batch(news_list):
             # แปลหัวข้อ
             if headline:
                 try:
+                    translator = GoogleTranslator(source='en', target='th')
                     news['headline_th'] = translator.translate(headline)
                 except Exception as e:
                     logger.warning(f"Failed to translate headline: {e}")
                     news['headline_th'] = headline
+            else:
+                news['headline_th'] = ''
             
-            # แปลสรุป (แบ่งถ้ายาวเกิน 5000 ตัวอักษร)
+            # แปลสรุป (Deep Translator จำกัดที่ 5000 ตัวอักษร)
             if summary:
                 try:
+                    translator = GoogleTranslator(source='en', target='th')
                     if len(summary) > 4500:
-                        # แบ่งเป็นส่วนๆ
+                        # ตัดให้สั้นลงถ้ายาวเกินไป
                         news['summary_th'] = translator.translate(summary[:4500]) + "..."
                     else:
                         news['summary_th'] = translator.translate(summary)
                 except Exception as e:
                     logger.warning(f"Failed to translate summary: {e}")
                     news['summary_th'] = summary
+            else:
+                news['summary_th'] = ''
         
         return news_list
         
+    except ImportError:
+        logger.error("deep-translator not installed, using English")
+        for news in news_list:
+            news['headline_th'] = news.get('headline', '')
+            news['summary_th'] = news.get('summary', '')
+        return news_list
     except Exception as e:
         logger.error(f"Translation error: {e}")
-        # ถ้าแปลไม่ได้ ให้ใช้ภาษาอังกฤษเดิม
         for news in news_list:
             news['headline_th'] = news.get('headline', '')
             news['summary_th'] = news.get('summary', '')
