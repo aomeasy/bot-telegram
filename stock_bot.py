@@ -511,7 +511,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
 
 💡 **วิธีใช้งาน:**
-- พิมพ์ชื่อหุ้น เช่น: AAPL, MSFT, TSLA
+- พิมพ์ชื่อหุ้น เช่น: NVDA,NFLX,AMZN,GOOGL,RKLB,V,MSFT,IVV,AVGO,META
 - /news SYMBOL - ดูข่าวล่าสุด
 - /help - ดูคำแนะนำ
 - /popular - ดูหุ้นยอดนิยม
@@ -546,20 +546,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def popular_stocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     popular = """📈 **หุ้นยอดนิยม**
 
-**เทคโนโลยี:**
-AAPL, MSFT, GOOGL, META, NVDA, TSLA, AMZN
+เทคโนโลยี:AAPL, MSFT, GOOGL, META, NVDA, TSLA, AMZN, AVGO, CRM, ADBE, ORCL, TSM, QCOM, ASML, RKLB 
 
-**การเงิน:**
-JPM, BAC, V, MA, GS, MS
+การเงิน:JPM, BAC, V, MA, GS, MS, BRK.B, BLK, WFC, AXP, PYPL, SCHW
 
-**พลังงาน:**
-XOM, CVX, COP, SLB
+พลังงาน:XOM, CVX, COP, SLB, EOG, MPC, PSX, VLO, HES
 
-**อุปโภคบริโภค:**
-WMT, KO, PG, MCD, NKE
+อุปโภคบริโภค:WMT, KO, PG, MCD, NKE, COST, PEP, HD, SBUX, PM, TGT, LOW
 
-**สุขภาพ:**
-JNJ, UNH, PFE, ABBV
+สุขภาพ:JNJ, UNH, PFE, ABBV, LLY, NVO, ISRG, AMGN, MDT, BMY
+
+อุตสาหกรรมและการขนส่ง:GE, CAT, LMT, HON, UPS, RTX, BA, DE, MMM, FEDEX
+
+บริการสื่อสารและบันเทิง:NFLX, DIS, TMUS, CMCSA, VZ, T, CHTR
+
+วัสดุและอุปกรณ์:LIN, APD, FCX, SHW, ECL, NEM
+
+สาธารณูปโภค:NEE, DUKE, SO, D, AEP, EXC
+
+อสังหาริมทรัพย์ (REITs):AMT, PLD, EQIX, CCI, SPG, O
 
 แค่พิมพ์ symbol เพื่อดูข้อมูลและตัวชี้วัด! 🚀"""
     await update.message.reply_text(popular, parse_mode='Markdown')
