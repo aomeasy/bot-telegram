@@ -684,11 +684,30 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **ตัวชี้วัดที่มี:**
 - RSI (14) - Relative Strength Index
+เหนือ 70 = Overbought (ซื้อมากเกิน) → สัญญาณขาย อาจมีการปรับตัวลง
+ต่ำกว่า 30 = Oversold (ขายมากเกิน) → สัญญาณซื้อ อาจมีการตีกลับ
+50 = จุดกลาง แสดงแนวโน้มสมดุล
 - MACD - Moving Average Convergence Divergence
+MACD ตัดขึ้น Signal = สัญญาณซื้อ (Bullish)
+MACD ตัดลง Signal = สัญญาณขาย (Bearish)
+Histogram เป็นบวก = แนวโน้มขึ้น
 - EMA (20, 50, 200) - Exponential Moving Average
+ความหมาย:
+EMA 20 = แนวโน้มระยะสั้น (1 เดือน)
+EMA 50 = แนวโน้มระยะกลาง (2-3 เดือน)
+EMA 200 = แนวโน้มระยะยาว (1 ปี)
+การใช้งาน:
+ราคาเหนือ EMA → เทรนด์ขึ้น (Uptrend)
+ราคาต่ำกว่า EMA → เทรนด์ลง (Downtrend)
+Golden Cross: EMA 50 ตัดขึ้น EMA 200 = สัญญาณซื้อแรง
+Death Cross: EMA 50 ตัดลง EMA 200 = สัญญาณขายแรง
 - Bollinger Bands (20) - แนวรับ/แนวต้าน
 - Valuation - ราคาเป้าหมายจากนักวิเคราะห์
 - Margin of Safety - ความปลอดภัยของราคา
+30-50% = ปลอดภัยมาก เหมาะลงทุนระยะยาว
+20-30% = ปลอดภัยปานกลาง
+< 20% = ความปลอดภัยต่ำ มีความเสี่ยง
+เป็นลบ = ราคาแพงเกินมูลค่า ไม่ควรซื้อ
 
 **ตัวอย่างการใช้:**
 พิมพ์: AAPL - วิเคราะห์หุ้น
