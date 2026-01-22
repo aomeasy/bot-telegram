@@ -17,6 +17,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGd
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBK--b6srIHU-gVq6YjueekuIFg3MfT2m4")  
 
 # --- API Functions ---
 
@@ -184,6 +185,66 @@ def get_company_news(symbol, days=7):
         logger.error(f"Error fetching company news: {e}")
         return None
 
+
+def analyze_news_with_gemini(news_list, symbol):
+    """วิเคราะห์ข่าวด้วย Gemini AI - สรุปว่าดีหรือไม่ดี"""
+    try:
+        if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+            logger.warning("No Gemini API key, skipping analysis")
+            return None
+        
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        # ใช้โมเดล Gemini Flash (เร็วและฟรี)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # เตรียมข้อมูลข่าวสำหรับ AI
+        news_text = f"ข่าวล่าสุดของหุ้น {symbol}:\n\n"
+        for i, news in enumerate(news_list[:5], 1):  # วิเคราะห์ 5 ข่าวล่าสุด
+            headline = news.get('headline_th', news.get('headline', ''))
+            summary = news.get('summary_th', news.get('summary', ''))
+            
+            news_text += f"ข่าวที่ {i}: {headline}\n"
+            if summary:
+                # จำกัดความยาว summary
+                short_summary = summary[:300] if len(summary) > 300 else summary
+                news_text += f"รายละเอียด: {short_summary}\n"
+            news_text += "\n"
+        
+        # Prompt สำหรับ Gemini
+        prompt = f"""{news_text}
+
+จากข่าวเหล่านี้ ช่วยวิเคราะห์และสรุปดังนี้:
+
+1. **สรุปภาพรวม**: สรุปประเด็นสำคัญของข่าวทั้งหมดในรอบสัปดาห์นี้ (2-3 ประโยค)
+
+2. **ผลกระทบต่อหุ้น**: วิเคราะห์ว่าข่าวเหล่านี้มีผลกระทบต่อราคาหุ้นอย่างไร
+   - ใช้ 🟢 สำหรับข่าวดี (Positive)
+   - ใช้ 🔴 สำหรับข่าวไม่ดี (Negative)  
+   - ใช้ 🟡 สำหรับข่าวกลางๆ (Neutral)
+
+3. **คะแนนความเชื่อมั่น**: ให้คะแนน sentiment จาก -10 ถึง +10
+   - -10 ถึง -5 = ข่าวร้ายมาก
+   - -4 ถึง -1 = ข่าวไม่ดี
+   - 0 = กลางๆ
+   - +1 ถึง +4 = ข่าวดี
+   - +5 ถึง +10 = ข่าวดีมาก
+
+ตอบเป็นภาษาไทยที่เข้าใจง่าย กระชับ ตรงประเด็น"""
+
+        # เรียก Gemini API
+        response = model.generate_content(prompt)
+        
+        if response and response.text:
+            return response.text.strip()
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Gemini analysis error: {e}")
+        return None
+        
 def translate_news_batch(news_list):
     """แปลข่าวทั้งหมดในคราวเดียวด้วย Deep Translator"""
     try:
@@ -250,7 +311,8 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /news MSFT - ดูข่าว Microsoft
 
 💡 จะแสดงข่าว 5 ข่าวล่าสุดใน 7 วันที่ผ่านมา
-🌐 ข่าวจะแปลเป็นภาษาไทยอัตโนมัติ"""
+🌐 ข่าวจะแปลเป็นภาษาไทยอัตโนมัติ
+🤖 AI จะวิเคราะห์ว่าเป็นข่าวดีหรือไม่ดี"""
         await update.message.reply_text(help_text, parse_mode='Markdown')
         return
     
@@ -265,7 +327,7 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     processing = await update.message.reply_text(
-        f"📰 กำลังดึงข่าว {symbol}...\n⏳ กำลังแปลเป็นภาษาไทย...",
+        f"📰 กำลังดึงข่าว {symbol}...\n⏳ กำลังแปลและวิเคราะห์...",
         parse_mode='Markdown'
     )
     
@@ -296,45 +358,48 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # แปลข่าวเป็นภาษาไทย
     news_data = translate_news_batch(news_data)
     
+    # วิเคราะห์ด้วย Gemini AI
+    ai_analysis = analyze_news_with_gemini(news_data, symbol)
+    
     # สร้างรายงานข่าว
     report = f"📰 **ข่าว {symbol.upper()}**\n"
     report += f"🗓️ 7 วันที่ผ่านมา ({len(news_data)} ข่าว)\n\n"
     
+    # เพิ่มการวิเคราะห์จาก AI (ถ้ามี)
+    if ai_analysis:
+        report += f"🤖 **การวิเคราะห์โดย AI:**\n{ai_analysis}\n\n"
+        report += f"{'='*40}\n\n"
+    
+    # แสดงข่าวแต่ละข่าว
     for i, news in enumerate(news_data, 1):
-        # ใช้ข่าวที่แปลแล้ว หรือภาษาอังกฤษถ้าแปลไม่ได้
         headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
         summary = news.get('summary_th', news.get('summary', ''))
         url = news.get('url', '')
         source = news.get('source', 'Unknown')
         
-        # จำกัดความยาว headline
+        # จำกัดความยาว
         if len(headline) > 150:
             headline = headline[:147] + "..."
         
-        # จำกัดความยาว summary
         if summary and len(summary) > 200:
             summary = summary[:197] + "..."
         
-        # แปลง timestamp เป็นวันที่ (แสดงเป็นภาษาไทย)
+        # แปลง timestamp
         timestamp = news.get('datetime', 0)
         if timestamp:
             news_date = datetime.fromtimestamp(timestamp)
-            
-            # แปลงเดือนเป็นภาษาไทย
             months_th = {
                 'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
                 'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
                 'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
                 'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
             }
-            
             month_en = news_date.strftime('%b')
             month_th = months_th.get(month_en, month_en)
             date_str = f"{news_date.strftime('%d')} {month_th} {news_date.strftime('%H:%M')}"
         else:
             date_str = 'N/A'
         
-        # สร้างรายงานแต่ละข่าว
         report += f"**{i}. {headline}**\n"
         report += f"🗓️ {date_str} | 📡 {source}\n"
         
@@ -351,13 +416,22 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
     except Exception as e:
-        # ถ้า message ยาวเกินไป ให้แบ่งส่ง
+        # ถ้า message ยาวเกินไป
         if "too long" in str(e).lower():
-            # ส่งครึ่งแรก
+            # ส่ง AI Analysis แยก
+            if ai_analysis:
+                analysis_report = f"📰 **ข่าว {symbol.upper()}**\n\n"
+                analysis_report += f"🤖 **การวิเคราะห์โดย AI:**\n{ai_analysis}\n\n"
+                analysis_report += f"{'='*40}\n\n"
+                analysis_report += f"📋 รายละเอียดข่าวจะส่งในข้อความถัดไป..."
+                
+                await processing.edit_text(analysis_report, parse_mode='Markdown')
+            
+            # แบ่งส่งข่าว
             half = len(news_data) // 2
             
-            report1 = f"📰 **ข่าว {symbol.upper()}** (ส่วนที่ 1/2)\n"
-            report1 += f"🗓️ 7 วันที่ผ่านมา\n\n"
+            # ส่วนที่ 1
+            report1 = f"📰 **ข่าว {symbol.upper()}** (1/2)\n\n"
             
             for i, news in enumerate(news_data[:half], 1):
                 headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
@@ -393,10 +467,10 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     report1 += f"🔗 [อ่านเพิ่มเติม]({url})\n"
                 report1 += f"\n"
             
-            await processing.edit_text(report1, parse_mode='Markdown', disable_web_page_preview=True)
+            await update.message.reply_text(report1, parse_mode='Markdown', disable_web_page_preview=True)
             
-            # ส่งครึ่งหลัง
-            report2 = f"📰 **ข่าว {symbol.upper()}** (ส่วนที่ 2/2)\n\n"
+            # ส่วนที่ 2
+            report2 = f"📰 **ข่าว {symbol.upper()}** (2/2)\n\n"
             
             for i, news in enumerate(news_data[half:], half + 1):
                 headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
