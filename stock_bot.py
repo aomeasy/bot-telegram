@@ -551,6 +551,159 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 
+async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """วิเคราะห์ข่าวหุ้นด้วย AI - ต้องระบุ symbol"""
+    
+    # ตรวจสอบว่ามี argument หรือไม่
+    if not context.args or len(context.args) == 0:
+        help_text = """🤖 **AI วิเคราะห์ข่าว**
+
+**วิธีใช้:**
+/ai SYMBOL
+
+**ตัวอย่าง:**
+/ai AAPL - วิเคราะห์ข่าว Apple ด้วย AI
+/ai TSLA - วิเคราะห์ข่าว Tesla ด้วย AI
+/ai MSFT - วิเคราะห์ข่าว Microsoft ด้วย AI
+
+💡 AI จะวิเคราะห์ข่าว 5 ข่าวล่าสุดและบอกว่า:
+   • 🟢 ข่าวดี (Positive)
+   • 🔴 ข่าวไม่ดี (Negative)
+   • 🟡 ข่าวกลางๆ (Neutral)
+   • คะแนนความเชื่อมั่น (-10 ถึง +10)
+
+⚡ ใช้ Gemini AI วิเคราะห์"""
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+        return
+    
+    symbol = context.args[0].strip().upper()
+    
+    # Validate symbol
+    if len(symbol) < 1 or len(symbol) > 6 or not symbol.isalpha():
+        await update.message.reply_text(
+            "❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /ai AAPL",
+            parse_mode='Markdown'
+        )
+        return
+    
+    processing = await update.message.reply_text(
+        f"🤖 กำลังวิเคราะห์ข่าว {symbol} ด้วย AI...\n⏳ กรุณารอสักครู่...",
+        parse_mode='Markdown'
+    )
+    
+    # ตรวจสอบ FINNHUB_KEY
+    if not FINNHUB_KEY or FINNHUB_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
+            "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
+            "รับ Free API Key: https://finnhub.io/register",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # ตรวจสอบ GEMINI_KEY
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
+            "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
+            "รับ Free API Key: https://makersuite.google.com/app/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # ดึงข้อมูลข่าว
+    news_data = get_company_news(symbol)
+    
+    if not news_data or len(news_data) == 0:
+        await processing.edit_text(
+            f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Symbol ไม่ถูกต้อง\n"
+            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
+            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # แปลข่าวเป็นภาษาไทย
+    news_data = translate_news_batch(news_data)
+    
+    # วิเคราะห์ด้วย Gemini AI
+    ai_analysis = analyze_news_with_gemini(news_data, symbol)
+    
+    if not ai_analysis:
+        await processing.edit_text(
+            f"❌ **ไม่สามารถวิเคราะห์ข่าวได้**\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Gemini API มีปัญหา\n"
+            f"• API Key ไม่ถูกต้อง\n"
+            f"• Network error\n\n"
+            f"💡 ลอง /news {symbol} เพื่อดูข่าวโดยไม่มี AI",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # สร้างรายงานการวิเคราะห์
+    report = f"🤖 **AI วิเคราะห์ข่าว {symbol.upper()}**\n"
+    report += f"🗓️ ข้อมูลจาก {len(news_data)} ข่าวล่าสุดใน 7 วัน\n\n"
+    report += f"{'='*40}\n\n"
+    report += ai_analysis
+    report += f"\n\n{'='*40}\n\n"
+    
+    # แสดงข่าวที่นำมาวิเคราะห์ (แบบสั้น)
+    report += f"📰 **ข่าวที่นำมาวิเคราะห์:**\n\n"
+    
+    for i, news in enumerate(news_data[:5], 1):
+        headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
+        
+        # จำกัดความยาว
+        if len(headline) > 100:
+            headline = headline[:97] + "..."
+        
+        # แปลง timestamp
+        timestamp = news.get('datetime', 0)
+        if timestamp:
+            news_date = datetime.fromtimestamp(timestamp)
+            months_th = {
+                'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
+                'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
+                'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
+                'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
+            }
+            month_en = news_date.strftime('%b')
+            month_th = months_th.get(month_en, month_en)
+            date_str = f"{news_date.strftime('%d')} {month_th}"
+        else:
+            date_str = 'N/A'
+        
+        report += f"{i}. {headline}\n"
+        report += f"   📅 {date_str}\n\n"
+    
+    report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}\n"
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+    
+    try:
+        await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
+    except Exception as e:
+        # ถ้า message ยาวเกินไป
+        if "too long" in str(e).lower():
+            # ส่งแค่การวิเคราะห์
+            short_report = f"🤖 **AI วิเคราะห์ข่าว {symbol.upper()}**\n"
+            short_report += f"🗓️ ข้อมูลจาก {len(news_data)} ข่าวล่าสุดใน 7 วัน\n\n"
+            short_report += f"{'='*40}\n\n"
+            short_report += ai_analysis
+            short_report += f"\n\n{'='*40}\n\n"
+            short_report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}\n"
+            short_report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+            
+            await processing.edit_text(short_report, parse_mode='Markdown', disable_web_page_preview=True)
+        else:
+            logger.error(f"Error sending AI analysis: {e}")
+            await processing.edit_text(
+                f"❌ เกิดข้อผิดพลาดในการส่งผล\n{str(e)}",
+                parse_mode='Markdown'
+            )
+
 def translate_to_thai(text):
     """แปลข้อความเป็นภาษาไทยด้วย Google Translate"""
     try:
