@@ -859,7 +859,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - คำแนะนำจากนักวิเคราะห์
 - 📰 ข่าวล่าสุด
 - 🤖 AI วิเคราะห์ข่าว (NEW!)"""
-    await update.message.reply_text(welcome, parse_mode='Markdown')'Markdown')
+    await update.message.reply_text(welcome, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """📚 **คู่มือการใช้งาน**
