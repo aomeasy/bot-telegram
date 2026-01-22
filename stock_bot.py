@@ -17,7 +17,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8336478185:AAF_OO9dQj4vjCictaD-aWoWWUGd
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBK--b6srIHU-gVq6YjueekuIFg3MfT2m4")  
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")  
 
 # --- API Functions ---
 
