@@ -5,6 +5,7 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.ext import CallbackContext
+from datetime import datetime, timedelta  # เพิ่ม timedelta
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -151,6 +152,138 @@ def get_price_target(symbol):
         logger.error(f"Error fetching price target: {e}")
         return None
 
+def get_company_news(symbol, days=7):
+    """ดึงข่าวบริษัท (จาก Finnhub)"""
+    try:
+        if not FINNHUB_KEY or FINNHUB_KEY == "":
+            return None
+        
+        from datetime import datetime, timedelta
+        
+        # คำนวณวันที่ย้อนหลัง
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=days)
+        
+        url = f"https://finnhub.io/api/v1/company-news"
+        params = {
+            "symbol": symbol,
+            "from": from_date.strftime('%Y-%m-%d'),
+            "to": to_date.strftime('%Y-%m-%d'),
+            "token": FINNHUB_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        # กรองและเรียงตามวันที่ล่าสุด
+        if data and isinstance(data, list):
+            # เอาแค่ 5 ข่าวล่าสุด
+            return data[:5]
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error fetching company news: {e}")
+        return None
+
+
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """แสดงข่าวหุ้น - ต้องระบุ symbol"""
+    
+    # ตรวจสอบว่ามี argument หรือไม่
+    if not context.args or len(context.args) == 0:
+        help_text = """📰 **คำสั่งดูข่าว**
+
+**วิธีใช้:**
+/news SYMBOL
+
+**ตัวอย่าง:**
+/news AAPL - ดูข่าว Apple
+/news TSLA - ดูข่าว Tesla
+/news MSFT - ดูข่าว Microsoft
+
+💡 จะแสดงข่าว 5 ข่าวล่าสุดใน 7 วันที่ผ่านมา"""
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+        return
+    
+    symbol = context.args[0].strip().upper()
+    
+    # Validate symbol
+    if len(symbol) < 1 or len(symbol) > 6 or not symbol.isalpha():
+        await update.message.reply_text(
+            "❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /news AAPL",
+            parse_mode='Markdown'
+        )
+        return
+    
+    processing = await update.message.reply_text(
+        f"📰 กำลังดึงข่าว {symbol}...",
+        parse_mode='Markdown'
+    )
+    
+    # ดึงข้อมูลข่าว
+    news_data = get_company_news(symbol)
+    
+    if not FINNHUB_KEY or FINNHUB_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
+            "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
+            "รับ Free API Key: https://finnhub.io/register",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not news_data or len(news_data) == 0:
+        await processing.edit_text(
+            f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Symbol ไม่ถูกต้อง\n"
+            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
+            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # สร้างรายงานข่าว
+    report = f"📰 **ข่าว {symbol.upper()}**\n"
+    report += f"🗓️ 7 วันที่ผ่านมา ({len(news_data)} ข่าว)\n\n"
+    
+    for i, news in enumerate(news_data, 1):
+        headline = news.get('headline', 'ไม่มีหัวข้อ')
+        summary = news.get('summary', '')
+        url = news.get('url', '')
+        source = news.get('source', 'Unknown')
+        
+        # จำกัดความยาว headline
+        if len(headline) > 100:
+            headline = headline[:97] + "..."
+        
+        # จำกัดความยาว summary
+        if summary and len(summary) > 150:
+            summary = summary[:147] + "..."
+        
+        # แปลง timestamp เป็นวันที่
+        timestamp = news.get('datetime', 0)
+        if timestamp:
+            news_date = datetime.fromtimestamp(timestamp)
+            date_str = news_date.strftime('%d %b %H:%M')
+        else:
+            date_str = 'N/A'
+        
+        report += f"**{i}. {headline}**\n"
+        report += f"🗓️ {date_str} | 📡 {source}\n"
+        
+        if summary:
+            report += f"{summary}\n"
+        
+        if url:
+            report += f"🔗 [อ่านเพิ่มเติม]({url})\n"
+        
+        report += f"\n"
+    
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+    
+    await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
+    
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
@@ -379,37 +512,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
 
 💡 **วิธีใช้งาน:**
-• พิมพ์ชื่อหุ้น เช่น: AAPL, MSFT, TSLA
-• /help - ดูคำแนะนำ
-• /popular - ดูหุ้นยอดนิยม
+- พิมพ์ชื่อหุ้น เช่น: AAPL, MSFT, TSLA
+- /news SYMBOL - ดูข่าวล่าสุด
+- /help - ดูคำแนะนำ
+- /popular - ดูหุ้นยอดนิยม
 
 ✨ วิเคราะห์ด้วย:
-• RSI, MACD, EMA, Bollinger Bands
-• Valuation & Margin of Safety
-• คำแนะนำจากนักวิเคราะห์"""
+- RSI, MACD, EMA, Bollinger Bands
+- Valuation & Margin of Safety
+- คำแนะนำจากนักวิเคราะห์
+- 📰 ข่าวล่าสุด (NEW!)"""
     await update.message.reply_text(welcome, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """📚 **คู่มือการใช้งาน**
 
 **ตัวชี้วัดที่มี:**
-• RSI (14) - Relative Strength Index
-• MACD - Moving Average Convergence Divergence
-• EMA (20, 50, 200) - Exponential Moving Average
-• Bollinger Bands (20) - แนวรับ/แนวต้าน
-• Valuation - ราคาเป้าหมายจากนักวิเคราะห์
-• Margin of Safety - ความปลอดภัยของราคา
+- RSI (14) - Relative Strength Index
+- MACD - Moving Average Convergence Divergence
+- EMA (20, 50, 200) - Exponential Moving Average
+- Bollinger Bands (20) - แนวรับ/แนวต้าน
+- Valuation - ราคาเป้าหมายจากนักวิเคราะห์
+- Margin of Safety - ความปลอดภัยของราคา
 
 **ตัวอย่างการใช้:**
-พิมพ์: AAPL
-พิมพ์: MSFT
-พิมพ์: TSLA
+พิมพ์: AAPL - วิเคราะห์หุ้น
+/news AAPL - ดูข่าวล่าสุด
 
 **คำสั่ง:**
-/popular - ดูหุ้นยอดนิยม
-
-⚠️ รองรับหุ้นอเมริกา และบางหุ้นนานาชาติ
-⚠️ ข้อมูลเพื่อการศึกษาเท่านั้น"""
+/news SYMBOL - ดูข่าวของหุ้น
+/popular - ดูหุ้นยอดนิยม """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def popular_stocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -477,6 +609,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("popular", popular_stocks))
+    application.add_handler(CommandHandler("news", news_command))  # ← เพิ่มบรรทัดนี้
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
