@@ -184,6 +184,38 @@ def get_company_news(symbol, days=7):
         logger.error(f"Error fetching company news: {e}")
         return None
 
+def translate_news_batch(news_list):
+    """แปลข่าวทั้งหมดในคราวเดียวด้วย Google Translate"""
+    try:
+        from googletrans import Translator
+        translator = Translator()
+        
+        for news in news_list:
+            headline = news.get('headline', '')
+            summary = news.get('summary', '')
+            
+            # แปลหัวข้อ
+            if headline:
+                try:
+                    result = translator.translate(headline, src='en', dest='th')
+                    news['headline_th'] = result.text
+                except:
+                    news['headline_th'] = headline
+            
+            # แปลสรุป
+            if summary:
+                try:
+                    result = translator.translate(summary, src='en', dest='th')
+                    news['summary_th'] = result.text
+                except:
+                    news['summary_th'] = summary
+        
+        return news_list
+        
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        # ถ้าแปลไม่ได้ ให้ใช้ภาษาอังกฤษเดิม
+        return news_list
 
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """แสดงข่าวหุ้น - ต้องระบุ symbol"""
@@ -200,7 +232,8 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /news TSLA - ดูข่าว Tesla
 /news MSFT - ดูข่าว Microsoft
 
-💡 จะแสดงข่าว 5 ข่าวล่าสุดใน 7 วันที่ผ่านมา"""
+💡 จะแสดงข่าว 5 ข่าวล่าสุดใน 7 วันที่ผ่านมา
+🌐 ข่าวจะแปลเป็นภาษาไทยอัตโนมัติ"""
         await update.message.reply_text(help_text, parse_mode='Markdown')
         return
     
@@ -215,13 +248,11 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     processing = await update.message.reply_text(
-        f"📰 กำลังดึงข่าว {symbol}...",
+        f"📰 กำลังดึงข่าว {symbol}...\n⏳ กำลังแปลเป็นภาษาไทย...",
         parse_mode='Markdown'
     )
     
-    # ดึงข้อมูลข่าว
-    news_data = get_company_news(symbol)
-    
+    # ตรวจสอบ API Key
     if not FINNHUB_KEY or FINNHUB_KEY == "":
         await processing.edit_text(
             "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
@@ -230,6 +261,9 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
+    
+    # ดึงข้อมูลข่าว
+    news_data = get_company_news(symbol)
     
     if not news_data or len(news_data) == 0:
         await processing.edit_text(
@@ -242,32 +276,48 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # แปลข่าวเป็นภาษาไทย
+    news_data = translate_news_batch(news_data)
+    
     # สร้างรายงานข่าว
     report = f"📰 **ข่าว {symbol.upper()}**\n"
     report += f"🗓️ 7 วันที่ผ่านมา ({len(news_data)} ข่าว)\n\n"
     
     for i, news in enumerate(news_data, 1):
-        headline = news.get('headline', 'ไม่มีหัวข้อ')
-        summary = news.get('summary', '')
+        # ใช้ข่าวที่แปลแล้ว หรือภาษาอังกฤษถ้าแปลไม่ได้
+        headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
+        summary = news.get('summary_th', news.get('summary', ''))
         url = news.get('url', '')
         source = news.get('source', 'Unknown')
         
         # จำกัดความยาว headline
-        if len(headline) > 100:
-            headline = headline[:97] + "..."
+        if len(headline) > 150:
+            headline = headline[:147] + "..."
         
         # จำกัดความยาว summary
-        if summary and len(summary) > 150:
-            summary = summary[:147] + "..."
+        if summary and len(summary) > 200:
+            summary = summary[:197] + "..."
         
-        # แปลง timestamp เป็นวันที่
+        # แปลง timestamp เป็นวันที่ (แสดงเป็นภาษาไทย)
         timestamp = news.get('datetime', 0)
         if timestamp:
             news_date = datetime.fromtimestamp(timestamp)
-            date_str = news_date.strftime('%d %b %H:%M')
+            
+            # แปลงเดือนเป็นภาษาไทย
+            months_th = {
+                'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
+                'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
+                'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
+                'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
+            }
+            
+            month_en = news_date.strftime('%b')
+            month_th = months_th.get(month_en, month_en)
+            date_str = f"{news_date.strftime('%d')} {month_th} {news_date.strftime('%H:%M')}"
         else:
             date_str = 'N/A'
         
+        # สร้างรายงานแต่ละข่าว
         report += f"**{i}. {headline}**\n"
         report += f"🗓️ {date_str} | 📡 {source}\n"
         
@@ -279,10 +329,116 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         report += f"\n"
     
-    report += f"⏰ อัพเดท: {datetime.now().strftime('%H:%M:%S')}"
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
     
-    await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
-    
+    try:
+        await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
+    except Exception as e:
+        # ถ้า message ยาวเกินไป ให้แบ่งส่ง
+        if "too long" in str(e).lower():
+            # ส่งครึ่งแรก
+            half = len(news_data) // 2
+            
+            report1 = f"📰 **ข่าว {symbol.upper()}** (ส่วนที่ 1/2)\n"
+            report1 += f"🗓️ 7 วันที่ผ่านมา\n\n"
+            
+            for i, news in enumerate(news_data[:half], 1):
+                headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
+                summary = news.get('summary_th', news.get('summary', ''))
+                url = news.get('url', '')
+                source = news.get('source', 'Unknown')
+                
+                if len(headline) > 150:
+                    headline = headline[:147] + "..."
+                if summary and len(summary) > 200:
+                    summary = summary[:197] + "..."
+                
+                timestamp = news.get('datetime', 0)
+                if timestamp:
+                    news_date = datetime.fromtimestamp(timestamp)
+                    months_th = {
+                        'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
+                        'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
+                        'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
+                        'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
+                    }
+                    month_en = news_date.strftime('%b')
+                    month_th = months_th.get(month_en, month_en)
+                    date_str = f"{news_date.strftime('%d')} {month_th} {news_date.strftime('%H:%M')}"
+                else:
+                    date_str = 'N/A'
+                
+                report1 += f"**{i}. {headline}**\n"
+                report1 += f"🗓️ {date_str} | 📡 {source}\n"
+                if summary:
+                    report1 += f"{summary}\n"
+                if url:
+                    report1 += f"🔗 [อ่านเพิ่มเติม]({url})\n"
+                report1 += f"\n"
+            
+            await processing.edit_text(report1, parse_mode='Markdown', disable_web_page_preview=True)
+            
+            # ส่งครึ่งหลัง
+            report2 = f"📰 **ข่าว {symbol.upper()}** (ส่วนที่ 2/2)\n\n"
+            
+            for i, news in enumerate(news_data[half:], half + 1):
+                headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
+                summary = news.get('summary_th', news.get('summary', ''))
+                url = news.get('url', '')
+                source = news.get('source', 'Unknown')
+                
+                if len(headline) > 150:
+                    headline = headline[:147] + "..."
+                if summary and len(summary) > 200:
+                    summary = summary[:197] + "..."
+                
+                timestamp = news.get('datetime', 0)
+                if timestamp:
+                    news_date = datetime.fromtimestamp(timestamp)
+                    months_th = {
+                        'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
+                        'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
+                        'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
+                        'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
+                    }
+                    month_en = news_date.strftime('%b')
+                    month_th = months_th.get(month_en, month_en)
+                    date_str = f"{news_date.strftime('%d')} {month_th} {news_date.strftime('%H:%M')}"
+                else:
+                    date_str = 'N/A'
+                
+                report2 += f"**{i}. {headline}**\n"
+                report2 += f"🗓️ {date_str} | 📡 {source}\n"
+                if summary:
+                    report2 += f"{summary}\n"
+                if url:
+                    report2 += f"🔗 [อ่านเพิ่มเติม]({url})\n"
+                report2 += f"\n"
+            
+            report2 += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+            
+            await update.message.reply_text(report2, parse_mode='Markdown', disable_web_page_preview=True)
+        else:
+            logger.error(f"Error sending news: {e}")
+            await processing.edit_text(
+                f"❌ เกิดข้อผิดพลาดในการส่งข่าว\n{str(e)}",
+                parse_mode='Markdown'
+            )
+
+
+def translate_to_thai(text):
+    """แปลข้อความเป็นภาษาไทยด้วย Google Translate"""
+    try:
+        from googletrans import Translator
+        translator = Translator()
+        result = translator.translate(text, src='en', dest='th')
+        return result.text
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        return text  # ถ้าแปลไม่ได้ ให้ใช้ภาษาอังกฤษเดิม
+
+
+
 def get_stock_analysis(symbol):
     """วิเคราะห์หุ้นแบบครบถ้วน"""
     try:
