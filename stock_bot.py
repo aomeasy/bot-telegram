@@ -185,10 +185,10 @@ def get_company_news(symbol, days=7):
         return None
 
 def translate_news_batch(news_list):
-    """แปลข่าวทั้งหมดในคราวเดียวด้วย Google Translate"""
+    """แปลข่าวทั้งหมดในคราวเดียวด้วย Deep Translator"""
     try:
-        from googletrans import Translator
-        translator = Translator()
+        from deep_translator import GoogleTranslator
+        translator = GoogleTranslator(source='en', target='th')
         
         for news in news_list:
             headline = news.get('headline', '')
@@ -197,17 +197,21 @@ def translate_news_batch(news_list):
             # แปลหัวข้อ
             if headline:
                 try:
-                    result = translator.translate(headline, src='en', dest='th')
-                    news['headline_th'] = result.text
-                except:
+                    news['headline_th'] = translator.translate(headline)
+                except Exception as e:
+                    logger.warning(f"Failed to translate headline: {e}")
                     news['headline_th'] = headline
             
-            # แปลสรุป
+            # แปลสรุป (แบ่งถ้ายาวเกิน 5000 ตัวอักษร)
             if summary:
                 try:
-                    result = translator.translate(summary, src='en', dest='th')
-                    news['summary_th'] = result.text
-                except:
+                    if len(summary) > 4500:
+                        # แบ่งเป็นส่วนๆ
+                        news['summary_th'] = translator.translate(summary[:4500]) + "..."
+                    else:
+                        news['summary_th'] = translator.translate(summary)
+                except Exception as e:
+                    logger.warning(f"Failed to translate summary: {e}")
                     news['summary_th'] = summary
         
         return news_list
@@ -215,6 +219,9 @@ def translate_news_batch(news_list):
     except Exception as e:
         logger.error(f"Translation error: {e}")
         # ถ้าแปลไม่ได้ ให้ใช้ภาษาอังกฤษเดิม
+        for news in news_list:
+            news['headline_th'] = news.get('headline', '')
+            news['summary_th'] = news.get('summary', '')
         return news_list
 
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
