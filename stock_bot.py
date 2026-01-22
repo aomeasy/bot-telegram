@@ -189,37 +189,40 @@ def get_company_news(symbol, days=7):
 def analyze_news_with_gemini(news_list, symbol):
     """วิเคราะห์ข่าวด้วย Gemini AI"""
     try:
+        # เช็ค API Key
         if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-            logger.warning("No Gemini API key, skipping analysis")
+            logger.warning("⚠️ No Gemini API key found - skipping AI analysis")
             return None
+        
+        logger.info(f"🔍 Starting Gemini analysis for {symbol}...")
         
         try:
             import google.generativeai as genai
         except ImportError as e:
-            logger.error(f"Cannot import google.generativeai: {e}")
+            logger.error(f"❌ Cannot import google.generativeai: {e}")
             return None
         
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ลองใช้โมเดลต่างๆ ตามลำดับ
+        # ลองใช้โมเดลต่างๆ
         model_names = [
-            'gemini-1.5-flash-latest',  # ลองอันนี้ก่อน
-            'gemini-1.5-pro-latest',    # ถ้าไม่ได้ลองอันนี้
-            'gemini-pro',               # ถ้ายังไม่ได้ใช้อันนี้
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro-latest',
+            'gemini-pro',
         ]
         
         model = None
         for model_name in model_names:
             try:
                 model = genai.GenerativeModel(model_name)
-                logger.info(f"Using Gemini model: {model_name}")
+                logger.info(f"✅ Using Gemini model: {model_name}")
                 break
             except Exception as e:
-                logger.warning(f"Model {model_name} not available: {e}")
+                logger.warning(f"⚠️ Model {model_name} not available: {e}")
                 continue
         
         if not model:
-            logger.error("No Gemini model available")
+            logger.error("❌ No Gemini model available")
             return None
         
         # เตรียมข้อมูลข่าว
@@ -233,6 +236,8 @@ def analyze_news_with_gemini(news_list, symbol):
                 short_summary = summary[:300] if len(summary) > 300 else summary
                 news_text += f"รายละเอียด: {short_summary}\n"
             news_text += "\n"
+        
+        logger.info(f"📝 Prepared {len(news_list)} news items for analysis")
         
         prompt = f"""{news_text}
 
@@ -254,16 +259,24 @@ def analyze_news_with_gemini(news_list, symbol):
 
 ตอบเป็นภาษาไทยที่เข้าใจง่าย กระชับ ตรงประเด็น"""
 
+        logger.info("🚀 Calling Gemini API...")
+        
         # Generate content
         response = model.generate_content(prompt)
         
-        if response and response.text:
-            return response.text.strip()
+        logger.info("✅ Gemini API responded")
         
-        return None
+        if response and response.text:
+            logger.info(f"📊 Analysis result length: {len(response.text)} characters")
+            return response.text.strip()
+        else:
+            logger.warning("⚠️ Gemini returned empty response")
+            return None
         
     except Exception as e:
-        logger.error(f"Gemini analysis error: {e}")
+        logger.error(f"❌ Gemini analysis error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
         
 def translate_news_batch(news_list):
