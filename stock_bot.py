@@ -1,11 +1,10 @@
 import os
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.ext import CallbackContext
-from datetime import datetime, timedelta  # เพิ่ม timedelta
+from telegram.ext import CallbackContext 
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
