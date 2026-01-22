@@ -187,16 +187,19 @@ def get_company_news(symbol, days=7):
 
 
 def analyze_news_with_gemini(news_list, symbol):
-    """วิเคราะห์ข่าวด้วย Gemini AI - สรุปว่าดีหรือไม่ดี"""
+    """วิเคราะห์ข่าวด้วย Gemini AI"""
     try:
         if not GEMINI_API_KEY or GEMINI_API_KEY == "":
             logger.warning("No Gemini API key, skipping analysis")
             return None
         
+        # Import ที่ถูกต้อง
         import google.generativeai as genai
+        
+        # Configure API key
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ใช้โมเดล Gemini Flash (เร็วและฟรี)
+        # ใช้โมเดล Gemini 1.5 Flash
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         # เตรียมข้อมูลข่าวสำหรับ AI
