@@ -193,29 +193,47 @@ def analyze_news_with_gemini(news_list, symbol):
             logger.warning("No Gemini API key, skipping analysis")
             return None
         
-        # Import ที่ถูกต้อง
-        import google.generativeai as genai
+        try:
+            import google.generativeai as genai
+        except ImportError as e:
+            logger.error(f"Cannot import google.generativeai: {e}")
+            return None
         
-        # Configure API key
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ใช้โมเดล Gemini 1.5 Flash
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # ลองใช้โมเดลต่างๆ ตามลำดับ
+        model_names = [
+            'gemini-1.5-flash-latest',  # ลองอันนี้ก่อน
+            'gemini-1.5-pro-latest',    # ถ้าไม่ได้ลองอันนี้
+            'gemini-pro',               # ถ้ายังไม่ได้ใช้อันนี้
+        ]
         
-        # เตรียมข้อมูลข่าวสำหรับ AI
+        model = None
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                logger.info(f"Using Gemini model: {model_name}")
+                break
+            except Exception as e:
+                logger.warning(f"Model {model_name} not available: {e}")
+                continue
+        
+        if not model:
+            logger.error("No Gemini model available")
+            return None
+        
+        # เตรียมข้อมูลข่าว
         news_text = f"ข่าวล่าสุดของหุ้น {symbol}:\n\n"
-        for i, news in enumerate(news_list[:5], 1):  # วิเคราะห์ 5 ข่าวล่าสุด
+        for i, news in enumerate(news_list[:5], 1):
             headline = news.get('headline_th', news.get('headline', ''))
             summary = news.get('summary_th', news.get('summary', ''))
             
             news_text += f"ข่าวที่ {i}: {headline}\n"
             if summary:
-                # จำกัดความยาว summary
                 short_summary = summary[:300] if len(summary) > 300 else summary
                 news_text += f"รายละเอียด: {short_summary}\n"
             news_text += "\n"
         
-        # Prompt สำหรับ Gemini
         prompt = f"""{news_text}
 
 จากข่าวเหล่านี้ ช่วยวิเคราะห์และสรุปดังนี้:
@@ -236,7 +254,7 @@ def analyze_news_with_gemini(news_list, symbol):
 
 ตอบเป็นภาษาไทยที่เข้าใจง่าย กระชับ ตรงประเด็น"""
 
-        # เรียก Gemini API
+        # Generate content
         response = model.generate_content(prompt)
         
         if response and response.text:
