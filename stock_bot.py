@@ -504,6 +504,7 @@ def _cache_analysis(symbol: str, data):
     for k in keys_to_delete:
         del _analysis_cache[k]
 
+
 async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """วิเคราะห์ข่าวหุ้นด้วย AI - ต้องระบุ symbol"""
     
@@ -515,15 +516,14 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 /ai SYMBOL
 
 **ตัวอย่าง:**
-/ai AAPL - วิเคราะห์ข่าว Apple ด้วย AI
-/ai TSLA - วิเคราะห์ข่าว Tesla ด้วย AI
-/ai MSFT - วิเคราะห์ข่าว Microsoft ด้วย AI
+/ai AAPL - วิเคราะห์ข่าว Apple
+/ai TSLA - วิเคราะห์ข่าว Tesla
+/ai MSFT - วิเคราะห์ข่าว Microsoft
 
-💡 AI จะวิเคราะห์ข่าว 5 ข่าวล่าสุดและบอกว่า:
-   • 🟢 ข่าวดี (Positive)
-   • 🔴 ข่าวไม่ดี (Negative)
-   • 🟡 ข่าวกลางๆ (Neutral)
+💡 AI จะวิเคราะห์ข่าว 5 ข่าวล่าสุดและให้:
    • คะแนนความเชื่อมั่น (-10 ถึง +10)
+   • แยกข่าวดี/ข่าวไม่ดี/ข่าวกลาง
+   • สรุปภาพรวมและคำแนะนำ
 
 ⚡ ใช้ Gemini AI วิเคราะห์"""
         await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -596,66 +596,118 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    # สร้างรายงานการวิเคราะห์
-    report = f"🤖 **AI วิเคราะห์ข่าว {symbol.upper()}**\n"
-    report += f"🗓️ ข้อมูลจาก {len(news_data)} ข่าวล่าสุดใน 7 วัน\n\n"
-    report += f"{'='*40}\n\n"
+    # นับจำนวนข่าวแต่ละประเภท
+    positive_count = ai_analysis.lower().count('🟢')
+    negative_count = ai_analysis.lower().count('🔴')
+    neutral_count = ai_analysis.lower().count('🟡')
+    
+    total_news = max(positive_count + negative_count + neutral_count, len(news_data))
+    if total_news > 0:
+        positive_pct = int((positive_count / total_news) * 100)
+        negative_pct = int((negative_count / total_news) * 100)
+        neutral_pct = int((neutral_count / total_news) * 100)
+    else:
+        positive_pct = negative_pct = neutral_pct = 0
+    
+    # สร้างรายงานการวิเคราะห์แบบใหม่
+    report = f"🤖 **AI วิเคราะห์ {symbol.upper()}**\n"
+    
+    # แสดงคะแนนความเชื่อมั่น (พยายามดึงจาก AI analysis)
+    score_line = ""
+    if "คะแนนความเชื่อมั่น:" in ai_analysis:
+        # ดึงคะแนนจาก AI analysis
+        import re
+        score_match = re.search(r'คะแนนความเชื่อมั่น:\s*([+-]?\d+)', ai_analysis)
+        if score_match:
+            score = int(score_match.group(1))
+            if score >= 7:
+                sentiment = "ข่าวดีมาก 🟢"
+            elif score >= 4:
+                sentiment = "ข่าวดี 🟢"
+            elif score >= 1:
+                sentiment = "ค่อนข้างดี 🟢"
+            elif score == 0:
+                sentiment = "เป็นกลาง 🟡"
+            elif score >= -3:
+                sentiment = "ค่อนข้างไม่ดี 🔴"
+            elif score >= -6:
+                sentiment = "ข่าวไม่ดี 🔴"
+            else:
+                sentiment = "ข่าวไม่ดีมาก 🔴"
+            
+            score_line = f"📊 คะแนนความเชื่อมั่น: {score:+d}/10 ({sentiment})\n"
+    
+    report += score_line
+    
+    # แสดงสัดส่วนข่าว
+    if total_news > 0:
+        report += f"📈 สัดส่วนข่าว: 🟢 {positive_pct}% | 🟡 {neutral_pct}% | 🔴 {negative_pct}%\n"
+    
+    report += f"\n{'─'*35}\n\n"
+    
+    # แสดงผลการวิเคราะห์
     report += ai_analysis
-    report += f"\n\n{'='*40}\n\n"
     
-    # แสดงข่าวที่นำมาวิเคราะห์ (แบบสั้น)
-    report += f"📰 **ข่าวที่นำมาวิเคราะห์:**\n\n"
-    
-    for i, news in enumerate(news_data[:5], 1):
-        headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
-        
-        # จำกัดความยาว
-        if len(headline) > 100:
-            headline = headline[:97] + "..."
-        
-        # แปลง timestamp
-        timestamp = news.get('datetime', 0)
-        if timestamp:
-            news_date = datetime.fromtimestamp(timestamp)
-            months_th = {
-                'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
-                'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
-                'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
-                'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
-            }
-            month_en = news_date.strftime('%b')
-            month_th = months_th.get(month_en, month_en)
-            date_str = f"{news_date.strftime('%d')} {month_th}"
-        else:
-            date_str = 'N/A'
-        
-        report += f"{i}. {headline}\n"
-        report += f"   📅 {date_str}\n\n"
-    
-    report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}\n"
-    report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+    # เพิ่ม disclaimer และข้อมูลเพิ่มเติม
+    report += f"\n\n{'─'*35}\n\n"
+    report += f"⚠️ **คำเตือน:** AI Analysis - ไม่ใช่คำแนะนำทางการเงิน\n"
+    report += f"📅 วิเคราะห์จากข่าว {len(news_data)} ข่าวใน 7 วันล่าสุด\n"
+    report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}"
     
     try:
         await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
     except Exception as e:
-        # ถ้า message ยาวเกินไป
-        if "too long" in str(e).lower():
-            # ส่งแค่การวิเคราะห์
-            short_report = f"🤖 **AI วิเคราะห์ข่าว {symbol.upper()}**\n"
-            short_report += f"🗓️ ข้อมูลจาก {len(news_data)} ข่าวล่าสุดใน 7 วัน\n\n"
-            short_report += f"{'='*40}\n\n"
-            short_report += ai_analysis
-            short_report += f"\n\n{'='*40}\n\n"
-            short_report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}\n"
-            short_report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        # ถ้า message ยาวเกินไป ให้ส่งแบบย่อ
+        if "too long" in str(e).lower() or "message is too long" in str(e).lower():
+            # แยกเฉพาะส่วนสำคัญ
+            short_report = f"🤖 **AI วิเคราะห์ {symbol.upper()}**\n"
+            short_report += score_line
             
-            await processing.edit_text(short_report, parse_mode='Markdown', disable_web_page_preview=True)
+            if total_news > 0:
+                short_report += f"📈 สัดส่วนข่าว: 🟢 {positive_pct}% | 🟡 {neutral_pct}% | 🔴 {negative_pct}%\n"
+            
+            short_report += f"\n{'─'*35}\n\n"
+            
+            # ตัดเฉพาะสรุปภาพรวมและคะแนน
+            if "1. สรุปภาพรวม:" in ai_analysis:
+                summary_start = ai_analysis.find("1. สรุปภาพรวม:")
+                summary_end = ai_analysis.find("2. ผลกระทบต่อหุ้น:")
+                if summary_end == -1:
+                    summary_end = ai_analysis.find("3. คะแนนความเชื่อมั่น:")
+                
+                if summary_end > summary_start:
+                    summary = ai_analysis[summary_start:summary_end].strip()
+                    short_report += summary + "\n\n"
+            
+            # เพิ่มคะแนนความเชื่อมั่น
+            if "3. คะแนนความเชื่อมั่น:" in ai_analysis:
+                score_section = ai_analysis[ai_analysis.find("3. คะแนนความเชื่อมั่น:"):]
+                short_report += score_section.strip() + "\n\n"
+            
+            short_report += f"{'─'*35}\n\n"
+            short_report += f"⚠️ AI Analysis - ไม่ใช่คำแนะนำทางการเงิน\n"
+            short_report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าวใน 7 วัน\n"
+            short_report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+            short_report += f"💡 ดูข่าวเต็ม: /news {symbol}"
+            
+            try:
+                await processing.edit_text(short_report, parse_mode='Markdown', disable_web_page_preview=True)
+            except Exception as e2:
+                logger.error(f"Error sending short AI analysis: {e2}")
+                await processing.edit_text(
+                    f"❌ ข้อความยาวเกินไป\n\n"
+                    f"💡 ลอง /news {symbol} เพื่อดูข่าวแทน",
+                    parse_mode='Markdown'
+                )
         else:
             logger.error(f"Error sending AI analysis: {e}")
             await processing.edit_text(
-                f"❌ เกิดข้อผิดพลาดในการส่งผล\n{str(e)}",
+                f"❌ เกิดข้อผิดพลาดในการส่งผล\n\n"
+                f"กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ",
                 parse_mode='Markdown'
             )
+             
 
 def translate_to_thai(text):
     """แปลข้อความเป็นภาษาไทยด้วย Google Translate"""
