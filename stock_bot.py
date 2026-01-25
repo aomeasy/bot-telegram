@@ -1,6 +1,8 @@
 import os
 import logging
 import requests
+import asyncio 
+from functools import lru_cache
 from datetime import datetime, timedelta 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -462,6 +464,46 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error sending news: {e}")
 
 
+
+
+# Constants
+MAX_HEADLINE_LENGTH = 100
+NEWS_DAYS_RANGE = 7
+MAX_NEWS_TO_ANALYZE = 5
+MIN_SYMBOL_LENGTH = 1
+MAX_SYMBOL_LENGTH = 6
+CACHE_TTL_SECONDS = 300  # 5 minutes
+
+# Simple in-memory cache
+_analysis_cache = {}
+
+def _get_cache_key(symbol: str) -> str:
+    """Generate cache key for analysis"""
+    return f"ai_analysis_{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}"
+
+def _get_cached_analysis(symbol: str):
+    """Get cached analysis if exists and not expired"""
+    cache_key = _get_cache_key(symbol)
+    if cache_key in _analysis_cache:
+        cached_data, timestamp = _analysis_cache[cache_key]
+        if datetime.now() - timestamp < timedelta(seconds=CACHE_TTL_SECONDS):
+            return cached_data
+    return None
+
+def _cache_analysis(symbol: str, data):
+    """Cache analysis result"""
+    cache_key = _get_cache_key(symbol)
+    _analysis_cache[cache_key] = (data, datetime.now())
+    
+    # Clean old cache entries
+    current_time = datetime.now()
+    keys_to_delete = [
+        k for k, (_, ts) in _analysis_cache.items()
+        if current_time - ts > timedelta(seconds=CACHE_TTL_SECONDS * 2)
+    ]
+    for k in keys_to_delete:
+        del _analysis_cache[k]
+
 async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """วิเคราะห์ข่าวหุ้นด้วย AI - ต้องระบุ symbol"""
     
@@ -490,10 +532,23 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     symbol = context.args[0].strip().upper()
     
     # Validate symbol
-    if len(symbol) < 1 or len(symbol) > 6 or not symbol.isalpha():
+    if (len(symbol) < MIN_SYMBOL_LENGTH or 
+        len(symbol) > MAX_SYMBOL_LENGTH or 
+        not symbol.isalpha()):
         await update.message.reply_text(
-            "❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /ai AAPL",
+            f"❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร {MIN_SYMBOL_LENGTH}-{MAX_SYMBOL_LENGTH} ตัว เช่น: /ai AAPL",
             parse_mode='Markdown'
+        )
+        return
+    
+    # Check cache first
+    cached_result = _get_cached_analysis(symbol)
+    if cached_result:
+        logger.info(f"Returning cached analysis for {symbol}")
+        await update.message.reply_text(
+            cached_result, 
+            parse_mode='Markdown', 
+            disable_web_page_preview=True
         )
         return
     
@@ -502,8 +557,8 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
     
-    # ตรวจสอบ FINNHUB_KEY
-    if not FINNHUB_KEY or FINNHUB_KEY == "":
+    # ตรวจสอบ API Keys
+    if not FINNHUB_KEY:
         await processing.edit_text(
             "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
             "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
@@ -512,8 +567,7 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    # ตรวจสอบ GEMINI_KEY
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+    if not GEMINI_API_KEY:
         await processing.edit_text(
             "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
             "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
@@ -522,98 +576,69 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    # ดึงข้อมูลข่าว
-    news_data = get_company_news(symbol)
-    
-    if not news_data or len(news_data) == 0:
+    try:
+        # ดึงข้อมูลข่าว
+        news_data = await asyncio.to_thread(get_company_news, symbol)
+        
+        if not news_data:
+            await processing.edit_text(
+                f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
+                f"อาจเป็นเพราะ:\n"
+                f"• Symbol ไม่ถูกต้อง\n"
+                f"• ไม่มีข่าวในช่วง {NEWS_DAYS_RANGE} วันที่ผ่านมา\n\n"
+                f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # แปลข่าวและวิเคราะห์แบบ parallel
+        news_data_translated, ai_analysis = await asyncio.gather(
+            asyncio.to_thread(translate_news_batch, news_data),
+            asyncio.to_thread(analyze_news_with_gemini, news_data, symbol)
+        )
+        
+        if not ai_analysis:
+            await processing.edit_text(
+                f"❌ **ไม่สามารถวิเคราะห์ข่าวได้**\n\n"
+                f"Gemini API อาจมีปัญหาชั่วคราว\n\n"
+                f"💡 ลอง /news {symbol} เพื่อดูข่าวโดยไม่มี AI",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # สร้างรายงานการวิเคราะห์
+        report = _build_analysis_report(symbol, len(news_data_translated), ai_analysis)
+        
+        # Cache the result
+        _cache_analysis(symbol, report)
+        
         await processing.edit_text(
-            f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
-            f"อาจเป็นเพราะ:\n"
-            f"• Symbol ไม่ถูกต้อง\n"
-            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
-            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+            report, 
+            parse_mode='Markdown', 
+            disable_web_page_preview=True
+        )
+        
+        logger.info(f"Successfully analyzed {symbol} with {len(news_data_translated)} news items")
+        
+    except Exception as e:
+        logger.error(f"Error in AI analysis for {symbol}: {e}", exc_info=True)
+        await processing.edit_text(
+            f"❌ เกิดข้อผิดพลาดในการวิเคราะห์\n\n"
+            f"💡 ลองใหม่อีกครั้ง หรือใช้ /news {symbol}",
             parse_mode='Markdown'
         )
-        return
-    
-    # แปลข่าวเป็นภาษาไทย
-    news_data = translate_news_batch(news_data)
-    
-    # วิเคราะห์ด้วย Gemini AI
-    ai_analysis = analyze_news_with_gemini(news_data, symbol)
-    
-    if not ai_analysis:
-        await processing.edit_text(
-            f"❌ **ไม่สามารถวิเคราะห์ข่าวได้**\n\n"
-            f"อาจเป็นเพราะ:\n"
-            f"• Gemini API มีปัญหา\n"
-            f"• API Key ไม่ถูกต้อง\n"
-            f"• Network error\n\n"
-            f"💡 ลอง /news {symbol} เพื่อดูข่าวโดยไม่มี AI",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # สร้างรายงานการวิเคราะห์
+
+def _build_analysis_report(symbol: str, news_count: int, ai_analysis: str) -> str:
+    """Build the analysis report message"""
     report = f"🤖 **AI วิเคราะห์ข่าว {symbol.upper()}**\n"
-    report += f"🗓️ ข้อมูลจาก {len(news_data)} ข่าวล่าสุดใน 7 วัน\n\n"
+    report += f"🗓️ ข้อมูลจาก {news_count} ข่าวล่าสุดใน {NEWS_DAYS_RANGE} วัน\n\n"
     report += f"{'='*40}\n\n"
     report += ai_analysis
     report += f"\n\n{'='*40}\n\n"
-    
-    # แสดงข่าวที่นำมาวิเคราะห์ (แบบสั้น)
-    report += f"📰 **ข่าวที่นำมาวิเคราะห์:**\n\n"
-    
-    for i, news in enumerate(news_data[:5], 1):
-        headline = news.get('headline_th', news.get('headline', 'ไม่มีหัวข้อ'))
-        
-        # จำกัดความยาว
-        if len(headline) > 100:
-            headline = headline[:97] + "..."
-        
-        # แปลง timestamp
-        timestamp = news.get('datetime', 0)
-        if timestamp:
-            news_date = datetime.fromtimestamp(timestamp)
-            months_th = {
-                'Jan': 'ม.ค.', 'Feb': 'ก.พ.', 'Mar': 'มี.ค.', 
-                'Apr': 'เม.ย.', 'May': 'พ.ค.', 'Jun': 'มิ.ย.',
-                'Jul': 'ก.ค.', 'Aug': 'ส.ค.', 'Sep': 'ก.ย.',
-                'Oct': 'ต.ค.', 'Nov': 'พ.ย.', 'Dec': 'ธ.ค.'
-            }
-            month_en = news_date.strftime('%b')
-            month_th = months_th.get(month_en, month_en)
-            date_str = f"{news_date.strftime('%d')} {month_th}"
-        else:
-            date_str = 'N/A'
-        
-        report += f"{i}. {headline}\n"
-        report += f"   📅 {date_str}\n\n"
-    
     report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}\n"
     report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
     
-    try:
-        await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception as e:
-        # ถ้า message ยาวเกินไป
-        if "too long" in str(e).lower():
-            # ส่งแค่การวิเคราะห์
-            short_report = f"🤖 **AI วิเคราะห์ข่าว {symbol.upper()}**\n"
-            short_report += f"🗓️ ข้อมูลจาก {len(news_data)} ข่าวล่าสุดใน 7 วัน\n\n"
-            short_report += f"{'='*40}\n\n"
-            short_report += ai_analysis
-            short_report += f"\n\n{'='*40}\n\n"
-            short_report += f"💡 ดูข่าวแบบละเอียด: /news {symbol}\n"
-            short_report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-            
-            await processing.edit_text(short_report, parse_mode='Markdown', disable_web_page_preview=True)
-        else:
-            logger.error(f"Error sending AI analysis: {e}")
-            await processing.edit_text(
-                f"❌ เกิดข้อผิดพลาดในการส่งผล\n{str(e)}",
-                parse_mode='Markdown'
-            )
+    return report 
 
 def translate_to_thai(text):
     """แปลข้อความเป็นภาษาไทยด้วย Google Translate"""
