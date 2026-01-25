@@ -206,8 +206,8 @@ def analyze_news_with_gemini(news_list, symbol):
         
         # ลองใช้โมเดลต่างๆ
         model_names = [
-            'gemini-1.5-flash-latest',
-            'gemini-1.5-pro-latest',
+            'gemini-1.5-flash',
+            'gemini-1.5-pro',
             'gemini-pro',
         ]
         
