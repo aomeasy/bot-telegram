@@ -906,7 +906,7 @@ Death Cross: EMA 50 ตัดลง EMA 200 = สัญญาณขายแร�
 **คำสั่ง:**
 /news SYMBOL - ดูข่าวของหุ้น
 /ai SYMBOL - AI วิเคราะห์ว่าข่าวดีหรือไม่ดี
-/popular - ดูหุ้นยอดนิยม
+/popular - ดูหุ้นยอดนิยม"""
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def popular_stocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
