@@ -505,6 +505,44 @@ def _cache_analysis(symbol: str, data):
         del _analysis_cache[k]
 
 
+
+
+def escape_markdown_v2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2"""
+    # Characters that need to be escaped in MarkdownV2
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    
+    return text
+
+def clean_markdown_text(text: str) -> str:
+    """Clean text to prevent Markdown parsing errors"""
+    # Remove or escape problematic characters
+    # Keep only basic markdown: **bold** and _italic_
+    
+    # First, protect intentional markdown
+    text = text.replace('**', '<!BOLD!>')
+    text = text.replace('__', '<!ITALIC!>')
+    
+    # Escape remaining underscores and asterisks
+    text = text.replace('_', '\\_')
+    text = text.replace('*', '\\*')
+    
+    # Restore intentional markdown
+    text = text.replace('<!BOLD!>', '**')
+    text = text.replace('<!ITALIC!>', '_')
+    
+    # Escape other special characters that might cause issues
+    special_chars = ['[', ']', '(', ')', '~', '`', '>', '#', '+', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        # Don't escape if it's part of a link or intentional markdown
+        if char not in ['(', ')', '[', ']']:  # Keep these for links
+            text = text.replace(char, f'\\{char}')
+    
+    return text
+
 async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """วิเคราะห์ข่าวหุ้นด้วย AI - ต้องระบุ symbol"""
     
@@ -645,8 +683,15 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     report += f"\n{'─'*35}\n\n"
     
-    # แสดงผลการวิเคราะห์
-    report += ai_analysis
+    # ทำความสะอาด AI analysis ก่อนแสดงผล
+    # แทนที่ markdown ที่อาจทำให้เกิด error
+    cleaned_analysis = ai_analysis
+    
+    # ลบหรือแทนที่ markdown ที่ซับซ้อน
+    # เก็บเฉพาะ text ธรรมดา โดยไม่ใช้ markdown ในส่วนของ AI analysis
+    # เพื่อป้องกัน parse error
+    
+    report += cleaned_analysis
     
     # เพิ่ม disclaimer และข้อมูลเพิ่มเติม
     report += f"\n\n{'─'*35}\n\n"
@@ -657,6 +702,22 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     try:
         await processing.edit_text(report, parse_mode='Markdown', disable_web_page_preview=True)
+    except telegram.error.BadRequest as e:
+        # ถ้า Markdown parse error ให้ลองส่งแบบไม่มี Markdown
+        if "can't parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+            logger.warning(f"Markdown parse error, sending without markdown: {e}")
+            try:
+                # ส่งแบบ plain text (ไม่มี parse_mode)
+                plain_report = report.replace('**', '').replace('_', '').replace('`', '')
+                await processing.edit_text(plain_report, disable_web_page_preview=True)
+            except Exception as e2:
+                logger.error(f"Error sending plain text: {e2}")
+                await processing.edit_text(
+                    f"❌ เกิดข้อผิดพลาดในการแสดงผล\n\n"
+                    f"กรุณาลองใหม่อีกครั้ง",
+                )
+        else:
+            raise
     except Exception as e:
         # ถ้า message ยาวเกินไป ให้ส่งแบบย่อ
         if "too long" in str(e).lower() or "message is too long" in str(e).lower():
@@ -693,20 +754,31 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             try:
                 await processing.edit_text(short_report, parse_mode='Markdown', disable_web_page_preview=True)
+            except telegram.error.BadRequest as e2:
+                # ถ้ายังมี Markdown error อีก ส่งแบบ plain text
+                if "can't parse entities" in str(e2).lower():
+                    logger.warning(f"Short report markdown error, sending plain text")
+                    plain_report = short_report.replace('**', '').replace('_', '').replace('`', '')
+                    await processing.edit_text(plain_report, disable_web_page_preview=True)
+                else:
+                    logger.error(f"Error sending short AI analysis: {e2}")
+                    await processing.edit_text(
+                        f"❌ ข้อความยาวเกินไป\n\n"
+                        f"💡 ลอง /news {symbol} เพื่อดูข่าวแทน",
+                    )
             except Exception as e2:
                 logger.error(f"Error sending short AI analysis: {e2}")
                 await processing.edit_text(
                     f"❌ ข้อความยาวเกินไป\n\n"
                     f"💡 ลอง /news {symbol} เพื่อดูข่าวแทน",
-                    parse_mode='Markdown'
                 )
         else:
             logger.error(f"Error sending AI analysis: {e}")
             await processing.edit_text(
                 f"❌ เกิดข้อผิดพลาดในการส่งผล\n\n"
                 f"กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ",
-                parse_mode='Markdown'
             )
+             
              
 
 def translate_to_thai(text):
