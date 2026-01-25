@@ -188,6 +188,170 @@ def get_company_news(symbol, days=7):
         return None
 
 
+
+def analyze_combined_with_gemini(news_list, symbol, technical_data):
+    """วิเคราะห์แบบรวม: ข่าว + เทคนิค ด้วย Gemini AI"""
+    try:
+        if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+            logger.warning("⚠️ No Gemini API key found - skipping AI analysis")
+            return None
+        
+        logger.info(f"🔍 Starting Combined Gemini analysis for {symbol}...")
+        
+        try:
+            import google.generativeai as genai
+        except ImportError as e:
+            logger.error(f"❌ Cannot import google.generativeai: {e}")
+            return None
+        
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        # ใช้โมเดลเดียวกับ analyze_news_with_gemini
+        model_names = [
+            'models/gemini-2.5-flash',
+            'models/gemini-flash-latest',
+            'models/gemini-2.0-flash',
+            'models/gemini-2.5-pro',
+            'models/gemini-pro-latest',
+        ]
+        
+        model = None
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                logger.info(f"✅ Using Gemini model: {model_name}")
+                break
+            except Exception as e:
+                logger.warning(f"⚠️ Cannot use {model_name}: {e}")
+                continue
+        
+        if model is None:
+            logger.error("❌ Cannot initialize any Gemini model")
+            return None
+        
+        # เตรียมข้อมูลข่าว
+        news_text = f"ข่าวล่าสุดของหุ้น {symbol} (5 ข่าวล่าสุด):\n\n"
+        for i, news in enumerate(news_list[:5], 1):
+            headline = news.get('headline_th', news.get('headline', ''))
+            summary = news.get('summary_th', news.get('summary', ''))
+            
+            news_text += f"ข่าวที่ {i}: {headline}\n"
+            if summary:
+                short_summary = summary[:300] if len(summary) > 300 else summary
+                news_text += f"รายละเอียด: {short_summary}\n"
+            news_text += "\n"
+        
+        # เตรียมข้อมูลเทคนิค
+        tech_text = f"\nข้อมูลเทคนิคของหุ้น {symbol}:\n\n"
+        tech_text += f"ราคาปัจจุบัน: ${technical_data.get('current', 0):.2f}\n"
+        tech_text += f"เปลี่ยนแปลง: {technical_data.get('change_pct', 0):+.2f}%\n\n"
+        
+        if technical_data.get('rsi'):
+            tech_text += f"RSI (14): {technical_data['rsi']:.1f}\n"
+            if technical_data['rsi'] <= 30:
+                tech_text += "  → Oversold (สัญญาณซื้อ)\n"
+            elif technical_data['rsi'] >= 70:
+                tech_text += "  → Overbought (สัญญาณขาย)\n"
+            else:
+                tech_text += "  → Neutral\n"
+        
+        if technical_data.get('macd') and technical_data.get('macd_signal'):
+            tech_text += f"\nMACD: {technical_data['macd']:.2f}\n"
+            tech_text += f"Signal: {technical_data['macd_signal']:.2f}\n"
+            if technical_data['macd'] > technical_data['macd_signal']:
+                tech_text += "  → Bullish (แนวโน้มขึ้น)\n"
+            else:
+                tech_text += "  → Bearish (แนวโน้มลง)\n"
+        
+        if technical_data.get('ema_20') and technical_data.get('ema_50'):
+            tech_text += f"\nEMA 20: ${technical_data['ema_20']:.2f}\n"
+            tech_text += f"EMA 50: ${technical_data['ema_50']:.2f}\n"
+            if technical_data.get('ema_200'):
+                tech_text += f"EMA 200: ${technical_data['ema_200']:.2f}\n"
+            
+            current = technical_data.get('current', 0)
+            if current > technical_data['ema_20'] > technical_data['ema_50']:
+                tech_text += "  → Uptrend (เทรนด์ขาขึ้นแข็งแกร่ง)\n"
+            elif current < technical_data['ema_20'] < technical_data['ema_50']:
+                tech_text += "  → Downtrend (เทรนด์ขาลง)\n"
+            else:
+                tech_text += "  → Sideways (เทรนด์ไม่ชัดเจน)\n"
+        
+        if technical_data.get('bb_lower') and technical_data.get('bb_upper'):
+            tech_text += f"\nBollinger Bands:\n"
+            tech_text += f"  Upper: ${technical_data['bb_upper']:.2f}\n"
+            tech_text += f"  Lower: ${technical_data['bb_lower']:.2f}\n"
+            bb_position = technical_data.get('bb_position', 50)
+            tech_text += f"  ตำแหน่งราคา: {bb_position:.0f}% ของแบนด์\n"
+        
+        if technical_data.get('analyst_buy_pct'):
+            tech_text += f"\nนักวิเคราะห์:\n"
+            tech_text += f"  แนะนำซื้อ: {technical_data['analyst_buy_pct']:.0f}%\n"
+        
+        if technical_data.get('upside_pct'):
+            tech_text += f"\nValuation:\n"
+            tech_text += f"  Upside Potential: {technical_data['upside_pct']:+.1f}%\n"
+        
+        # Prompt ที่รวมทั้งข่าวและเทคนิค
+        prompt = f"""{news_text}
+
+{tech_text}
+
+จากข้อมูลข่าวและข้อมูลเทคนิคข้างต้น ช่วยวิเคราะห์แบบรวมดังนี้:
+
+**PART 1: วิเคราะห์จากข่าว**
+1. สรุปข่าวและแยกเป็น:
+   - 🟢 ข่าวดี (Positive)
+   - 🟡 ข่าวกลาง (Neutral)
+   - 🔴 ข่าวไม่ดี (Negative)
+2. ให้คะแนน Sentiment จากข่าว: -10 ถึง +10
+
+**PART 2: วิเคราะห์จากเทคนิค**
+1. สรุปสัญญาณเทคนิค (Bullish/Bearish/Neutral)
+2. ระบุแนวรับ/แนวต้านที่สำคัญ
+3. ประเมินตำแหน่งราคาปัจจุบัน (ใกล้แนวรับหรือแนวต้าน)
+
+**PART 3: สรุปรวมและคำแนะนำ**
+1. **เปรียบเทียบสัญญาณ:**
+   - ข่าวกับเทคนิคสอดคล้องกันหรือไม่?
+   - ถ้าขัดแย้งกัน (เช่น ข่าวดีแต่เทคนิคขาลง) ให้เตือนชัดเจน
+   
+2. **คำแนะนำการเทรด:**
+   - ควรซื้อ/ขาย/รอดู
+   - จุดเข้าที่เหมาะสม
+   - ตั้ง Stop Loss ที่ไหน
+   - เป้าหมายกำไร
+   
+3. **คะแนนความเชื่อมั่นรวม:** -10 ถึง +10
+   - รวมทั้งข่าว + เทคนิค + นักวิเคราะห์
+
+**รูปแบบตอบ:**
+- ใช้ภาษาไทยที่เข้าใจง่าย
+- กระชับ ตรงประเด็น
+- เน้นข้อมูลที่นักลงทุนต้องการรู้จริงๆ
+- ห้ามใช้ markdown ** หรือ __ เด็ดขาด
+- ใช้เพียง emoji และข้อความธรรมดา"""
+
+        logger.info("🚀 Calling Gemini API for combined analysis...")
+        
+        response = model.generate_content(prompt)
+        
+        logger.info("✅ Gemini API responded")
+        
+        if response and hasattr(response, 'text') and response.text:
+            logger.info(f"📊 Combined analysis result length: {len(response.text)} characters")
+            return response.text.strip()
+        else:
+            logger.warning("⚠️ Gemini returned empty response")
+            return None
+        
+    except Exception as e:
+        logger.error(f"❌ Combined Gemini analysis error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+
 def analyze_news_with_gemini(news_list, symbol):
     """วิเคราะห์ข่าวด้วย Gemini AI"""
     try:
@@ -1018,6 +1182,209 @@ def get_stock_analysis(symbol):
 
 # --- Telegram Handlers ---
 
+
+async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """วิเคราะห์แบบรวม: ข่าว + เทคนิค ด้วย AI"""
+    
+    # ตรวจสอบว่ามี argument หรือไม่
+    if not context.args or len(context.args) == 0:
+        help_text = """🚀 **AI วิเคราะห์เต็มรูปแบบ (News + Technical)**
+
+**วิธีใช้:**
+/aiplus SYMBOL
+
+**ตัวอย่าง:**
+/aiplus AAPL
+/aiplus TSLA
+/aiplus V
+
+💡 **ความแตกต่างจาก /ai:**
+✅ วิเคราะห์ครบมิติ - ทั้ง Fundamental (ข่าว) + Technical (กราฟ)
+✅ ยืนยันสัญญาณ - ถ้าข่าวดีแต่เทคนิคขาลง = สัญญาณเตือน
+✅ จับจังหวะซื้อขาย - รู้ว่าควรเข้าตอนไหน
+✅ ลดความเสี่ยง - ไม่พึ่งข้อมูลด้านเดียว
+
+⚡ ใช้ Gemini AI วิเคราะห์แบบรวม"""
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+        return
+    
+    symbol = context.args[0].strip().upper()
+    
+    # Validate symbol
+    if len(symbol) < MIN_SYMBOL_LENGTH or len(symbol) > MAX_SYMBOL_LENGTH or not symbol.isalpha():
+        await update.message.reply_text(
+            "❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /aiplus AAPL",
+            parse_mode='Markdown'
+        )
+        return
+    
+    processing = await update.message.reply_text(
+        f"🚀 กำลังวิเคราะห์ {symbol} แบบเต็มรูปแบบ...\n"
+        f"⏳ กำลังรวบรวมข้อมูล:\n"
+        f"  • ข่าวล่าสุด\n"
+        f"  • ตัวชี้วัดเทคนิค\n"
+        f"  • ข้อมูลนักวิเคราะห์\n"
+        f"  • AI กำลังวิเคราะห์...",
+        parse_mode='Markdown'
+    )
+    
+    # ตรวจสอบ API Keys
+    if not FINNHUB_KEY or FINNHUB_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
+            "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
+            "รับ Free API Key: https://finnhub.io/register",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
+            "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
+            "รับ Free API Key: https://makersuite.google.com/app/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ TWELVE_DATA_KEY**\n\n"
+            "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment\n"
+            "รับ Free API Key: https://twelvedata.com/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 1. ดึงข้อมูลข่าว
+    news_data = get_company_news(symbol, days=NEWS_DAYS_RANGE)
+    
+    if not news_data or len(news_data) == 0:
+        await processing.edit_text(
+            f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Symbol ไม่ถูกต้อง\n"
+            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
+            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 2. ดึงข้อมูลเทคนิค
+    quote = get_quote(symbol)
+    if not quote or 'close' not in quote:
+        await processing.edit_text(
+            f"❌ ไม่สามารถดึงข้อมูลเทคนิคของ {symbol} ได้\n\n"
+            f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # เก็บข้อมูลเทคนิค
+    current = float(quote['close'])
+    prev_close = float(quote.get('previous_close', current))
+    change = current - prev_close
+    change_pct = (change / prev_close) * 100
+    
+    technical_data = {
+        'current': current,
+        'change_pct': change_pct,
+        'rsi': get_rsi(symbol),
+        'macd': None,
+        'macd_signal': None,
+        'ema_20': get_ema(symbol, 20),
+        'ema_50': get_ema(symbol, 50),
+        'ema_200': get_ema(symbol, 200),
+        'bb_lower': None,
+        'bb_upper': None,
+        'bb_position': None,
+        'analyst_buy_pct': None,
+        'upside_pct': None
+    }
+    
+    # MACD
+    macd, macd_signal = get_macd(symbol)
+    if macd is not None:
+        technical_data['macd'] = macd
+        technical_data['macd_signal'] = macd_signal
+    
+    # Bollinger Bands
+    bb_lower, bb_upper = get_bbands(symbol)
+    if bb_lower and bb_upper:
+        technical_data['bb_lower'] = bb_lower
+        technical_data['bb_upper'] = bb_upper
+        technical_data['bb_position'] = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
+    
+    # Analyst recommendations
+    recommendations = get_analyst_recommendations(symbol)
+    if recommendations:
+        buy = recommendations.get('buy', 0)
+        hold = recommendations.get('hold', 0)
+        sell = recommendations.get('sell', 0)
+        total = buy + hold + sell
+        if total > 0:
+            technical_data['analyst_buy_pct'] = (buy / total) * 100
+    
+    # Price target
+    price_target = get_price_target(symbol)
+    if price_target and price_target['target_mean']:
+        target_mean = price_target['target_mean']
+        technical_data['upside_pct'] = ((target_mean - current) / current) * 100
+    
+    # 3. แปลข่าว
+    news_data = translate_news_batch(news_data)
+    
+    # 4. วิเคราะห์ด้วย AI แบบรวม
+    combined_analysis = analyze_combined_with_gemini(news_data, symbol, technical_data)
+    
+    if not combined_analysis:
+        await processing.edit_text(
+            f"❌ **ไม่สามารถวิเคราะห์ได้**\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Gemini API มีปัญหา\n"
+            f"• API Key ไม่ถูกต้อง\n"
+            f"• Network error\n\n"
+            f"💡 ลอง /ai {symbol} หรือ /news {symbol}",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 5. สร้างรายงาน
+    report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
+    report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
+    report += f"{'─'*35}\n\n"
+    
+    # AI Analysis
+    report += combined_analysis
+    
+    # Footer
+    report += f"\n\n{'─'*35}\n"
+    report += f"⚠️ AI Analysis - ไม่ใช่คำแนะนำทางการเงิน\n"
+    report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
+    report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    report += f"💡 ข่าว: /news {symbol} | เทคนิค: พิมพ์ {symbol}"
+    
+    try:
+        await processing.edit_text(report, disable_web_page_preview=True)
+    except Exception as e:
+        # Handle errors
+        if "too long" in str(e).lower() or "message is too long" in str(e).lower():
+            # Split into multiple messages
+            max_length = 4000
+            parts = [report[i:i+max_length] for i in range(0, len(report), max_length)]
+            
+            for i, part in enumerate(parts):
+                if i == 0:
+                    await processing.edit_text(part, disable_web_page_preview=True)
+                else:
+                    await update.message.reply_text(part, disable_web_page_preview=True)
+        else:
+            logger.error(f"Error sending aiplus analysis: {e}")
+            await processing.edit_text(
+                f"❌ เกิดข้อผิดพลาดในการแสดงผล\n\n"
+                f"กรุณาลองใหม่อีกครั้ง",
+            )
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
 
@@ -1147,7 +1514,8 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("popular", popular_stocks))
     application.add_handler(CommandHandler("news", news_command))
-    application.add_handler(CommandHandler("ai", ai_analysis_command))  # ← เพิ่มบรรทัดนี้
+    application.add_handler(CommandHandler("ai", ai_analysis_command))  
+    application.add_handler(CommandHandler("aiplus", aiplus_command))
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
