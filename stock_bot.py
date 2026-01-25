@@ -328,7 +328,14 @@ def translate_news_batch(news_list):
             news['headline_th'] = news.get('headline', '')
             news['summary_th'] = news.get('summary', '')
         return news_list
-
+        
+def escape_markdown(text):
+    """Escape markdown special characters"""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+    
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """แสดงข่าวหุ้น - ต้องระบุ symbol"""
     
@@ -427,7 +434,8 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             date_str = 'N/A'
         
-        report += f"**{i}. {headline}**\n"
+        headline_escaped = escape_markdown(headline) if headline else 'ไม่มีหัวข้อ'
+        report += f"**{i}. {headline_escaped}**\n"
         report += f"🗓️ {date_str} | 📡 {source}\n"
         
         if summary:
