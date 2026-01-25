@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.ext import CallbackContext 
+from alert_scheduler import AlertScheduler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -1687,6 +1688,13 @@ def main():
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_error_handler(error_handler)
+
+    # ===== เพิ่มส่วนนี้ =====
+    # เริ่ม Alert Scheduler
+    alert_scheduler = AlertScheduler(application)
+    alert_scheduler.start()
+    logger.info("🚀 Alert Scheduler initialized")
+    # =========================
     
     if WEBHOOK_URL and "onrender.com" in WEBHOOK_URL:
         try:
