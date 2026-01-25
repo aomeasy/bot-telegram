@@ -185,7 +185,6 @@ def get_company_news(symbol, days=7):
         logger.error(f"Error fetching company news: {e}")
         return None
 
- 
 
 def analyze_news_with_gemini(news_list, symbol):
     """วิเคราะห์ข่าวด้วย Gemini AI"""
@@ -205,56 +204,27 @@ def analyze_news_with_gemini(news_list, symbol):
         
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ✅ ใช้ชื่อโมเดลแบบเต็ม
+        # ✅ ใช้โมเดลที่ใช้งานได้จริง (เรียงตามความเร็วและประสิทธิภาพ)
         model_names = [
-            'models/gemini-1.5-flash-latest',
-            'models/gemini-1.5-pro-latest', 
-            'models/gemini-pro',
-            'models/gemini-1.5-flash',
-            'gemini-1.5-flash',
-            'gemini-pro',
+            'models/gemini-2.5-flash',          # แนะนำ - เร็วและดี
+            'models/gemini-flash-latest',       # ทางเลือกที่ 2
+            'models/gemini-2.0-flash',          # ทางเลือกที่ 3
+            'models/gemini-2.5-pro',            # ดีที่สุดแต่ช้ากว่า
+            'models/gemini-pro-latest',         # fallback
         ]
         
         model = None
-        last_error = None
-        
-        # ลองทุก model
         for model_name in model_names:
             try:
-                logger.info(f"🔄 Trying model: {model_name}")
-                test_model = genai.GenerativeModel(model_name)
-                
-                # ทดสอบว่าใช้งานได้จริง
-                test_response = test_model.generate_content("Hello")
-                
-                if test_response and hasattr(test_response, 'text'):
-                    model = test_model
-                    logger.info(f"✅ Successfully using model: {model_name}")
-                    break
-                    
+                model = genai.GenerativeModel(model_name)
+                logger.info(f"✅ Using Gemini model: {model_name}")
+                break
             except Exception as e:
-                last_error = str(e)
-                logger.warning(f"⚠️ Model {model_name} failed: {e}")
+                logger.warning(f"⚠️ Cannot use {model_name}: {e}")
                 continue
         
         if model is None:
-            logger.error(f"❌ All models failed. Last error: {last_error}")
-            
-            # ลอง list models ที่มี
-            try:
-                logger.info("📋 Listing available models...")
-                available = []
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        available.append(m.name)
-                        logger.info(f"  - {m.name}")
-                
-                if not available:
-                    logger.error("❌ No models available with generateContent support")
-                    
-            except Exception as list_error:
-                logger.error(f"❌ Cannot list models: {list_error}")
-            
+            logger.error("❌ Cannot initialize any Gemini model")
             return None
         
         # เตรียมข้อมูลข่าว
@@ -273,37 +243,42 @@ def analyze_news_with_gemini(news_list, symbol):
         
         prompt = f"""{news_text}
 จากข่าวเหล่านี้ ช่วยวิเคราะห์และสรุปดังนี้:
+
 1. **สรุปภาพรวม**: สรุปประเด็นสำคัญของข่าวทั้งหมดในรอบสัปดาห์นี้ (2-3 ประโยค)
+
 2. **ผลกระทบต่อหุ้น**: วิเคราะห์ว่าข่าวเหล่านี้มีผลกระทบต่อราคาหุ้นอย่างไร
    - ใช้ 🟢 สำหรับข่าวดี (Positive)
    - ใช้ 🔴 สำหรับข่าวไม่ดี (Negative)  
    - ใช้ 🟡 สำหรับข่าวกลางๆ (Neutral)
+
 3. **คะแนนความเชื่อมั่น**: ให้คะแนน sentiment จาก -10 ถึง +10
+   - -10 ถึง -5 = ข่าวร้ายมาก
+   - -4 ถึง -1 = ข่าวไม่ดี
+   - 0 = กลางๆ
+   - +1 ถึง +4 = ข่าวดี
+   - +5 ถึง +10 = ข่าวดีมาก
+
 ตอบเป็นภาษาไทยที่เข้าใจง่าย กระชับ ตรงประเด็น"""
-        
+
         logger.info("🚀 Calling Gemini API...")
         
-        try:
-            response = model.generate_content(prompt)
-            
-            logger.info("✅ Gemini API responded")
-            
-            if response and hasattr(response, 'text') and response.text:
-                logger.info(f"📊 Analysis result length: {len(response.text)} characters")
-                return response.text.strip()
-            else:
-                logger.warning("⚠️ Gemini returned empty response")
-                return None
-                
-        except Exception as gen_error:
-            logger.error(f"❌ Generation error: {gen_error}")
+        # Generate content
+        response = model.generate_content(prompt)
+        
+        logger.info("✅ Gemini API responded")
+        
+        if response and hasattr(response, 'text') and response.text:
+            logger.info(f"📊 Analysis result length: {len(response.text)} characters")
+            return response.text.strip()
+        else:
+            logger.warning("⚠️ Gemini returned empty response")
             return None
         
     except Exception as e:
         logger.error(f"❌ Gemini analysis error: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return None
+        return None 
         
 def translate_news_batch(news_list):
     """แปลข่าวทั้งหมดในคราวเดียวด้วย Deep Translator"""
