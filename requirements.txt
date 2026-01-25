@@ -7,3 +7,9 @@ requests==2.31.0
 aiohttp==3.9.1
 deep-translator==1.11.4
 google-generativeai==0.8.3
+googletrans==4.0.0rc1
+APScheduler==3.10.4
+pytz==2024.1
+python-redis==0.1.0
+colorlog==6.8.0
+redis==5.0.1
