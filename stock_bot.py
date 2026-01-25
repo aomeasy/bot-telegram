@@ -1009,7 +1009,7 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if total_news > 0:
         report += f"📈 สัดส่วนข่าว: 🟢 {positive_pct}% | 🟡 {neutral_pct}% | 🔴 {negative_pct}%\n"
     
-    report += f"\n{'─'*35}\n\n"
+    report += f"\n{'─'*35}\n"
     
     # ทำความสะอาด AI analysis ก่อนแสดงผล
     # แทนที่ markdown ที่อาจทำให้เกิด error
@@ -1022,7 +1022,7 @@ async def ai_analysis_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     report += cleaned_analysis
     
     # เพิ่ม disclaimer และข้อมูลเพิ่มเติม
-    report += f"\n\n{'─'*35}\n\n"
+    #report += f"\n\n{'─'*35}\n\n"
     #report += f"⚠️ **คำเตือน:** AI Analysis - ไม่ใช่คำแนะนำทางการเงิน\n"
     report += f"📅 วิเคราะห์จากข่าว {len(news_data)} ข่าวใน 7 วันล่าสุด\n"
     report += f"⏰ อัพเดท: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
@@ -1515,14 +1515,13 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 5. สร้างรายงาน
     report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
     report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
-    report += f"{'─'*35}\n\n"
+    #report += f"{'─'*35}\n\n"
     
     # AI Analysis
     report += combined_analysis
     
     # Footer
-    report += f"\n\n{'─'*35}\n"
-    report += f"⚠️ AI Analysis - ไม่ใช่คำแนะนำทางการเงิน\n"
+    report += f"\n\n{'─'*35}\n" 
     report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
     report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
     report += f"💡 ข่าว: /news {symbol}"
