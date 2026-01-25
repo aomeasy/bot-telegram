@@ -205,24 +205,17 @@ def analyze_news_with_gemini(news_list, symbol):
         genai.configure(api_key=GEMINI_API_KEY)
         
         # ลองใช้โมเดลต่างๆ
-        model_names = [
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-pro',
-        ]
-        
-        model = None
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name)
-                logger.info(f"✅ Using Gemini model: {model_name}")
-                break
-            except Exception as e:
-                logger.warning(f"⚠️ Model {model_name} not available: {e}")
-                continue
-        
-        if not model:
-            logger.error("❌ No Gemini model available")
+        #model_names = [
+        #    'gemini-1.5-flash',
+        #    'gemini-1.5-pro',
+        #    'gemini-pro',
+        #]
+ 
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            logger.info("✅ Using Gemini model: gemini-1.5-flash")
+        except Exception as e:
+            logger.error(f"❌ Cannot initialize Gemini model: {e}")
             return None
         
         # เตรียมข้อมูลข่าว
