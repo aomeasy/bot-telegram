@@ -1525,27 +1525,40 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
     report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
     report += f"💡 ข่าว: /news {symbol}"
-    
+     
     try:
-        await processing.edit_text(report, disable_web_page_preview=True)
-    except Exception as e:
-        # Handle errors
-        if "too long" in str(e).lower() or "message is too long" in str(e).lower():
-            # Split into multiple messages
-            max_length = 4000
-            parts = [report[i:i+max_length] for i in range(0, len(report), max_length)]
+        # เช็คความยาวก่อนส่ง
+        if len(report) > 4000:
+            # แบ่งส่งทันที
+            max_length = 3500  # ลดลงเพื่อความปลอดภัย
             
-            for i, part in enumerate(parts):
-                if i == 0:
-                    await processing.edit_text(part, disable_web_page_preview=True)
-                else:
-                    await update.message.reply_text(part, disable_web_page_preview=True)
+            # หาจุดตัดที่เหมาะสม (ตัด ณ จุดขึ้นบรรทัดใหม่)
+            first_part = report[:max_length]
+            last_newline = first_part.rfind('\n')
+            if last_newline > 3000:  # มี newline ใกล้ๆ
+                first_part = report[:last_newline]
+                second_part = report[last_newline+1:]
+            else:
+                first_part = report[:max_length]
+                second_part = report[max_length:]
+            
+            await processing.edit_text(first_part, disable_web_page_preview=True)
+            await update.message.reply_text(second_part, disable_web_page_preview=True)
         else:
-            logger.error(f"Error sending aiplus analysis: {e}")
-            await processing.edit_text(
-                f"❌ เกิดข้อผิดพลาดในการแสดงผล\n\n"
-                f"กรุณาลองใหม่อีกครั้ง",
-            )
+            await processing.edit_text(report, disable_web_page_preview=True)
+            
+    except Exception as e:
+        logger.error(f"Error sending aiplus analysis: {e}")
+        # Fallback: ส่งแบบสั้น
+        short_report = f"🤖 AI วิเคราะห์ {symbol.upper()}\n"
+        short_report += f"💰 ${current:.2f} ({change_pct:+.2f}%)\n\n"
+        short_report += combined_analysis[:3000] + "\n\n...(ตัดข้อความ)\n\n"
+        short_report += f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        
+        try:
+            await processing.edit_text(short_report, disable_web_page_preview=True)
+        except:
+            await processing.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
