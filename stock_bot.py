@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.ext import CallbackContext  
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -22,14 +20,6 @@ TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")  
-# --- Popular Stocks Dictionary ---
-POPULAR_STOCKS = {
-    "🔥 ยอดนิยม": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "TSLA"],
-    "💰 การเงิน": ["V", "MA", "JPM", "BAC", "GS", "PYPL"],
-    "🛒 อุปโภคบริโภค": ["WMT", "KO", "PG", "MCD", "NKE", "COST"],
-    "🏥 สุขภาพ": ["JNJ", "UNH", "PFE", "ABBV", "LLY", "NVO"],
-    "📱 เทค & AI": ["NVDA", "AVGO", "RKLB", "AMZN", "CRM", "ORCL"],
-}
 
 # --- API Functions ---
 
@@ -1356,36 +1346,31 @@ def get_stock_analysis(symbol):
 # --- Telegram Handlers ---
 
 
-
-
 async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """วิเคราะห์แบบรวม: ข่าว + เทคนิค ด้วย AI"""
     
     # ตรวจสอบว่ามี argument หรือไม่
     if not context.args or len(context.args) == 0:
-        # แสดงเมนูปุ่มแทนข้อความช่วยเหลือ
-        keyboard = []
-        for category in POPULAR_STOCKS.keys():
-            keyboard.append([InlineKeyboardButton(category, callback_data=f"category_{category}")])
-        
-        keyboard.append([InlineKeyboardButton("ℹ️ วิธีใช้งาน", callback_data="aiplus_help")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "🚀 **AI วิเคราะห์เต็มรูปแบบ**\n\n"
-            "📊 เลือกหมวดหมู่หุ้นที่ต้องการวิเคราะห์:\n\n"
-            "💡 **คุณสมบัติพิเศษ:**\n"
-            "✅ วิเคราะห์ทั้งข่าวและเทคนิค\n"
-            "✅ จับสัญญาณขัดแย้ง\n"
-            "✅ แนะนำจุดเข้า-ออก\n\n"
-            "หรือพิมพ์: `/aiplus SYMBOL`",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        help_text = """🚀 **AI วิเคราะห์เต็มรูปแบบ (News + Technical)**
+
+**วิธีใช้:**
+/aiplus SYMBOL
+
+**ตัวอย่าง:**
+/aiplus AAPL
+/aiplus TSLA
+/aiplus V
+
+💡 **ความแตกต่างจาก /ai:**
+✅ วิเคราะห์ครบมิติ - ทั้ง Fundamental (ข่าว) + Technical (กราฟ)
+✅ ยืนยันสัญญาณ - ถ้าข่าวดีแต่เทคนิคขาลง = สัญญาณเตือน
+✅ จับจังหวะซื้อขาย - รู้ว่าควรเข้าตอนไหน
+✅ ลดความเสี่ยง - ไม่พึ่งข้อมูลด้านเดียว
+
+⚡ ใช้ Gemini AI วิเคราะห์แบบรวม"""
+        await update.message.reply_text(help_text, parse_mode='Markdown')
         return
     
-    # ถ้ามี argument ให้ใช้ logic เดิม
     symbol = context.args[0].strip().upper()
     
     # Validate symbol
@@ -1406,99 +1391,9 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # เรียกใช้ฟังก์ชันวิเคราะห์
-    await perform_aiplus_analysis(processing, symbol)
-
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks"""
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data
-    
-    if data == "aiplus_menu":
-        # แสดงเมนูหมวดหมู่หุ้น
-        keyboard = []
-        for category in POPULAR_STOCKS.keys():
-            keyboard.append([InlineKeyboardButton(category, callback_data=f"category_{category}")])
-        
-        keyboard.append([InlineKeyboardButton("🔙 กลับ", callback_data="back_to_main")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "🚀 **เลือกหมวดหมู่หุ้นที่ต้องการวิเคราะห์:**\n\n"
-            "💡 AI จะวิเคราะห์ครบทั้งข่าวและเทคนิค",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    
-    elif data.startswith("category_"):
-        # แสดงรายการหุ้นในหมวดหมู่
-        category = data.replace("category_", "")
-        stocks = POPULAR_STOCKS.get(category, [])
-        
-        keyboard = []
-        # แสดงหุ้นเป็นแถวละ 3 ตัว
-        for i in range(0, len(stocks), 3):
-            row = []
-            for symbol in stocks[i:i+3]:
-                row.append(InlineKeyboardButton(symbol, callback_data=f"analyze_{symbol}"))
-            keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 กลับ", callback_data="aiplus_menu")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"{category} **- เลือกหุ้นที่ต้องการวิเคราะห์:**\n\n"
-            f"📊 กดปุ่มเพื่อวิเคราะห์ด้วย AI",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    
-    elif data.startswith("analyze_"):
-        # วิเคราะห์หุ้นที่เลือก
-        symbol = data.replace("analyze_", "")
-        
-        await query.edit_message_text(
-            f"🚀 กำลังวิเคราะห์ {symbol} แบบเต็มรูปแบบ...\n"
-            f"⏳ กำลังรวบรวมข้อมูล:\n"
-            f"  • ข่าวล่าสุด\n"
-            f"  • ตัวชี้วัดเทคนิค\n"
-            f"  • ข้อมูลนักวิเคราะห์\n"
-            f"  • AI กำลังวิเคราะห์...",
-            parse_mode='Markdown'
-        )
-        
-        # เรียกใช้ฟังก์ชันวิเคราะห์ (ใช้ logic เดิม)
-        await perform_aiplus_analysis(query.message, symbol)
-    
-    elif data == "back_to_main":
-        # กลับไปหน้าหลัก
-        keyboard = [
-            [InlineKeyboardButton("🚀 วิเคราะห์หุ้น (AI Plus)", callback_data="aiplus_menu")],
-            [InlineKeyboardButton("📰 ดูข่าว", callback_data="news_menu")],
-            [InlineKeyboardButton("📈 หุ้นยอดนิยม", callback_data="show_popular")]
-        ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "🤖 **Stock Analysis Bot**\n\n"
-            "เลือกเมนูที่ต้องการ:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-
-
-async def perform_aiplus_analysis(message, symbol):
-    """ฟังก์ชันวิเคราะห์แบบเต็มรูปแบบ (แยกออกมาจาก aiplus_command)"""
-    
     # ตรวจสอบ API Keys
     if not FINNHUB_KEY or FINNHUB_KEY == "":
-        await message.edit_text(
+        await processing.edit_text(
             "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
             "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
             "รับ Free API Key: https://finnhub.io/register",
@@ -1507,7 +1402,7 @@ async def perform_aiplus_analysis(message, symbol):
         return
     
     if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-        await message.edit_text(
+        await processing.edit_text(
             "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
             "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
             "รับ Free API Key: https://makersuite.google.com/app/apikey",
@@ -1516,7 +1411,7 @@ async def perform_aiplus_analysis(message, symbol):
         return
     
     if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
-        await message.edit_text(
+        await processing.edit_text(
             "⚠️ **ไม่พบ TWELVE_DATA_KEY**\n\n"
             "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment\n"
             "รับ Free API Key: https://twelvedata.com/apikey",
@@ -1528,16 +1423,12 @@ async def perform_aiplus_analysis(message, symbol):
     news_data = get_company_news(symbol, days=NEWS_DAYS_RANGE)
     
     if not news_data or len(news_data) == 0:
-        # สร้างปุ่มกลับ
-        keyboard = [[InlineKeyboardButton("🔙 เลือกหุ้นใหม่", callback_data="aiplus_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await message.edit_text(
+        await processing.edit_text(
             f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
             f"อาจเป็นเพราะ:\n"
             f"• Symbol ไม่ถูกต้อง\n"
-            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา",
-            reply_markup=reply_markup,
+            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
+            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
             parse_mode='Markdown'
         )
         return
@@ -1545,18 +1436,14 @@ async def perform_aiplus_analysis(message, symbol):
     # 2. ดึงข้อมูลเทคนิค
     quote = get_quote(symbol)
     if not quote or 'close' not in quote:
-        keyboard = [[InlineKeyboardButton("🔙 เลือกหุ้นใหม่", callback_data="aiplus_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await message.edit_text(
+        await processing.edit_text(
             f"❌ ไม่สามารถดึงข้อมูลเทคนิคของ {symbol} ได้\n\n"
             f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return
     
-    # เก็บข้อมูลเทคนิค (logic เดิม)
+    # เก็บข้อมูลเทคนิค
     current = float(quote['close'])
     prev_close = float(quote.get('previous_close', current))
     change = current - prev_close
@@ -1614,16 +1501,13 @@ async def perform_aiplus_analysis(message, symbol):
     combined_analysis = analyze_combined_with_gemini(news_data, symbol, technical_data)
     
     if not combined_analysis:
-        keyboard = [[InlineKeyboardButton("🔙 เลือกหุ้นใหม่", callback_data="aiplus_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await message.edit_text(
+        await processing.edit_text(
             f"❌ **ไม่สามารถวิเคราะห์ได้**\n\n"
             f"อาจเป็นเพราะ:\n"
             f"• Gemini API มีปัญหา\n"
             f"• API Key ไม่ถูกต้อง\n"
-            f"• Network error",
-            reply_markup=reply_markup,
+            f"• Network error\n\n"
+            f"💡 ลอง /ai {symbol} หรือ /news {symbol}",
             parse_mode='Markdown'
         )
         return
@@ -1631,6 +1515,7 @@ async def perform_aiplus_analysis(message, symbol):
     # 5. สร้างรายงาน
     report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
     report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
+    #report += f"{'─'*35}\n\n"
     
     # AI Analysis
     report += combined_analysis
@@ -1638,68 +1523,66 @@ async def perform_aiplus_analysis(message, symbol):
     # Footer
     report += f"\n\n{'─'*35}\n" 
     report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
-    report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    
-    # เพิ่มปุ่มกลับและวิเคราะห์หุ้นอื่น
-    keyboard = [
-        [InlineKeyboardButton("🔄 วิเคราะห์หุ้นอื่น", callback_data="aiplus_menu")],
-        [InlineKeyboardButton("📰 ดูข่าว " + symbol, callback_data=f"news_{symbol}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    report += f"💡 ข่าว: /news {symbol}"
      
     try:
         # เช็คความยาวก่อนส่ง
         if len(report) > 4000:
             # แบ่งส่งทันที
-            max_length = 3500
+            max_length = 3500  # ลดลงเพื่อความปลอดภัย
             
+            # หาจุดตัดที่เหมาะสม (ตัด ณ จุดขึ้นบรรทัดใหม่)
             first_part = report[:max_length]
             last_newline = first_part.rfind('\n')
-            if last_newline > 3000:
+            if last_newline > 3000:  # มี newline ใกล้ๆ
                 first_part = report[:last_newline]
                 second_part = report[last_newline+1:]
             else:
                 first_part = report[:max_length]
                 second_part = report[max_length:]
             
-            await message.edit_text(first_part, disable_web_page_preview=True)
-            await message.reply_text(second_part, reply_markup=reply_markup, disable_web_page_preview=True)
+            await processing.edit_text(first_part, disable_web_page_preview=True)
+            await update.message.reply_text(second_part, disable_web_page_preview=True)
         else:
-            await message.edit_text(report, reply_markup=reply_markup, disable_web_page_preview=True)
+            await processing.edit_text(report, disable_web_page_preview=True)
             
     except Exception as e:
         logger.error(f"Error sending aiplus analysis: {e}")
-        # Fallback
+        # Fallback: ส่งแบบสั้น
         short_report = f"🤖 AI วิเคราะห์ {symbol.upper()}\n"
         short_report += f"💰 ${current:.2f} ({change_pct:+.2f}%)\n\n"
-        short_report += combined_analysis[:3000] + "\n\n...(ตัดข้อความ)"
+        short_report += combined_analysis[:3000] + "\n\n...(ตัดข้อความ)\n\n"
+        short_report += f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
         
         try:
-            await message.edit_text(short_report, reply_markup=reply_markup, disable_web_page_preview=True)
+            await processing.edit_text(short_report, disable_web_page_preview=True)
         except:
-            await message.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่", reply_markup=reply_markup)
-            
+            await processing.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🚀 วิเคราะห์หุ้น (AI Plus)", callback_data="aiplus_menu")],
-        [InlineKeyboardButton("📈 หุ้นยอดนิยม", callback_data="show_popular")],
-        [InlineKeyboardButton("ℹ️ วิธีใช้งาน", callback_data="show_help")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
 
-✨ **ฟีเจอร์หลัก:**
-🚀 AI วิเคราะห์แบบรวม (ข่าว + เทคนิค)
-📰 ข่าวล่าสุดแปลไทย
-📊 ตัวชี้วัดเทคนิค
-💎 Valuation Analysis
+💡 **วิธีใช้งาน:**
+- พิมพ์ชื่อหุ้น เช่น: NVDA,NFLX,AMZN,GOOGL,RKLB,V,MSFT,IVV,AVGO,META
+- /news SYMBOL - ดูข่าวล่าสุด
+- /ai SYMBOL - AI วิเคราะห์ข่าว 
+- /aiplus SYMBOL - AI วิเคราะห์แบบรวม (ข่าว+เทคนิค) 🚀
+- /help - ดูคำแนะนำ
+- /popular - ดูหุ้นยอดนิยม
 
-**เริ่มต้นใช้งาน:**
-กดปุ่มด้านล่าง หรือพิมพ์ `/aiplus SYMBOL`"""
-    
-    await update.message.reply_text(welcome, reply_markup=reply_markup, parse_mode='Markdown')
+✨ วิเคราะห์ด้วย:
+- RSI, MACD, EMA, Bollinger Bands
+- Valuation & Margin of Safety
+- คำแนะนำจากนักวิเคราะห์
+- 📰 ข่าวล่าสุด
+- 🤖 AI วิเคราะห์ข่าว (NEW!)
+
+🎯 **ทำไมต้อง /aiplus:**
+✅ วิเคราะห์ครบ 360° - ทั้งข่าวและกราฟ
+✅ จับสัญญาณขัดแย้ง - ข่าวดีแต่เทคนิคขาลง? AI จะเตือน
+✅ คำแนะนำการเทรด - รู้ว่าควรเข้าตอนไหน ตั้ง SL ที่ไหน"""
+    await update.message.reply_text(welcome, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """📚 **คู่มือการใช้งาน**
@@ -1816,11 +1699,9 @@ def main():
     application.add_handler(CommandHandler("aiplus", aiplus_command))
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
-
-
- # เพิ่มบรรทัดนี้
-    application.add_handler(CallbackQueryHandler(button_callback)) 
     application.add_error_handler(error_handler)
+
+ 
     
     
     if WEBHOOK_URL and "onrender.com" in WEBHOOK_URL:
