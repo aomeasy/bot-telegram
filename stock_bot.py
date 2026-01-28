@@ -5,8 +5,8 @@ import asyncio
 from functools import lru_cache
 from datetime import datetime, timedelta 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.ext import CallbackContext  
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -1351,10 +1351,36 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ตรวจสอบว่ามี argument หรือไม่
     if not context.args or len(context.args) == 0:
+        # สร้างปุ่มเลือกหุ้นยอดนิยม
+        keyboard = [
+            [
+                InlineKeyboardButton("NVDA", callback_data="aiplus_NVDA"),
+                InlineKeyboardButton("AAPL", callback_data="aiplus_AAPL"),
+                InlineKeyboardButton("MSFT", callback_data="aiplus_MSFT"),
+            ],
+            [
+                InlineKeyboardButton("GOOGL", callback_data="aiplus_GOOGL"),
+                InlineKeyboardButton("META", callback_data="aiplus_META"),
+                InlineKeyboardButton("TSLA", callback_data="aiplus_TSLA"),
+            ],
+            [
+                InlineKeyboardButton("AMZN", callback_data="aiplus_AMZN"),
+                InlineKeyboardButton("NFLX", callback_data="aiplus_NFLX"),
+                InlineKeyboardButton("V", callback_data="aiplus_V"),
+            ],
+            [
+                InlineKeyboardButton("AVGO", callback_data="aiplus_AVGO"),
+                InlineKeyboardButton("RKLB", callback_data="aiplus_RKLB"),
+                InlineKeyboardButton("IVV", callback_data="aiplus_IVV"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         help_text = """🚀 **AI วิเคราะห์เต็มรูปแบบ (News + Technical)**
 
 **วิธีใช้:**
-/aiplus SYMBOL
+1️⃣ กดปุ่มเลือกหุ้นด้านล่าง
+2️⃣ หรือพิมพ์ /aiplus SYMBOL
 
 **ตัวอย่าง:**
 /aiplus AAPL
@@ -1367,21 +1393,42 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ✅ จับจังหวะซื้อขาย - รู้ว่าควรเข้าตอนไหน
 ✅ ลดความเสี่ยง - ไม่พึ่งข้อมูลด้านเดียว
 
-⚡ ใช้ Gemini AI วิเคราะห์แบบรวม"""
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+⚡ ใช้ Gemini AI วิเคราะห์แบบรวม
+
+👇 เลือกหุ้นยอดนิยม หรือพิมพ์ Symbol เอง"""
+        
+        await update.message.reply_text(
+            help_text, 
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
         return
     
-    symbol = context.args[0].strip().upper()
+    symbol = context.args[0].strip().upper()   
+
+
+async def aiplus_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button clicks from /aiplus menu"""
+    query = update.callback_query
+    await query.answer()
+    
+    # ดึง symbol จาก callback_data (รูปแบบ: "aiplus_SYMBOL")
+    callback_data = query.data
+    if not callback_data.startswith("aiplus_"):
+        return
+    
+    symbol = callback_data.replace("aiplus_", "").strip().upper()
     
     # Validate symbol
     if len(symbol) < MIN_SYMBOL_LENGTH or len(symbol) > MAX_SYMBOL_LENGTH or not symbol.isalpha():
-        await update.message.reply_text(
-            "❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /aiplus AAPL",
+        await query.edit_message_text(
+            f"❌ Symbol {symbol} ไม่ถูกต้อง",
             parse_mode='Markdown'
         )
         return
     
-    processing = await update.message.reply_text(
+    # แก้ไขข้อความเป็น processing
+    processing = await query.edit_message_text(
         f"🚀 กำลังวิเคราะห์ {symbol} แบบเต็มรูปแบบ...\n"
         f"⏳ กำลังรวบรวมข้อมูล:\n"
         f"  • ข่าวล่าสุด\n"
@@ -1393,7 +1440,7 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ตรวจสอบ API Keys
     if not FINNHUB_KEY or FINNHUB_KEY == "":
-        await processing.edit_text(
+        await query.edit_message_text(
             "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
             "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
             "รับ Free API Key: https://finnhub.io/register",
@@ -1402,7 +1449,7 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-        await processing.edit_text(
+        await query.edit_message_text(
             "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
             "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
             "รับ Free API Key: https://makersuite.google.com/app/apikey",
@@ -1411,7 +1458,7 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
-        await processing.edit_text(
+        await query.edit_message_text(
             "⚠️ **ไม่พบ TWELVE_DATA_KEY**\n\n"
             "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment\n"
             "รับ Free API Key: https://twelvedata.com/apikey",
@@ -1423,7 +1470,7 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     news_data = get_company_news(symbol, days=NEWS_DAYS_RANGE)
     
     if not news_data or len(news_data) == 0:
-        await processing.edit_text(
+        await query.edit_message_text(
             f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
             f"อาจเป็นเพราะ:\n"
             f"• Symbol ไม่ถูกต้อง\n"
@@ -1436,7 +1483,7 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. ดึงข้อมูลเทคนิค
     quote = get_quote(symbol)
     if not quote or 'close' not in quote:
-        await processing.edit_text(
+        await query.edit_message_text(
             f"❌ ไม่สามารถดึงข้อมูลเทคนิคของ {symbol} ได้\n\n"
             f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
             parse_mode='Markdown'
@@ -1501,7 +1548,7 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     combined_analysis = analyze_combined_with_gemini(news_data, symbol, technical_data)
     
     if not combined_analysis:
-        await processing.edit_text(
+        await query.edit_message_text(
             f"❌ **ไม่สามารถวิเคราะห์ได้**\n\n"
             f"อาจเป็นเพราะ:\n"
             f"• Gemini API มีปัญหา\n"
@@ -1515,7 +1562,6 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 5. สร้างรายงาน
     report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
     report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
-    #report += f"{'─'*35}\n\n"
     
     # AI Analysis
     report += combined_analysis
@@ -1530,25 +1576,28 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # เช็คความยาวก่อนส่ง
         if len(report) > 4000:
             # แบ่งส่งทันที
-            max_length = 3500  # ลดลงเพื่อความปลอดภัย
+            max_length = 3500
             
-            # หาจุดตัดที่เหมาะสม (ตัด ณ จุดขึ้นบรรทัดใหม่)
             first_part = report[:max_length]
             last_newline = first_part.rfind('\n')
-            if last_newline > 3000:  # มี newline ใกล้ๆ
+            if last_newline > 3000:
                 first_part = report[:last_newline]
                 second_part = report[last_newline+1:]
             else:
                 first_part = report[:max_length]
                 second_part = report[max_length:]
             
-            await processing.edit_text(first_part, disable_web_page_preview=True)
-            await update.message.reply_text(second_part, disable_web_page_preview=True)
+            await query.edit_message_text(first_part, disable_web_page_preview=True)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=second_part,
+                disable_web_page_preview=True
+            )
         else:
-            await processing.edit_text(report, disable_web_page_preview=True)
+            await query.edit_message_text(report, disable_web_page_preview=True)
             
     except Exception as e:
-        logger.error(f"Error sending aiplus analysis: {e}")
+        logger.error(f"Error sending aiplus analysis from button: {e}")
         # Fallback: ส่งแบบสั้น
         short_report = f"🤖 AI วิเคราะห์ {symbol.upper()}\n"
         short_report += f"💰 ${current:.2f} ({change_pct:+.2f}%)\n\n"
@@ -1556,9 +1605,9 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         short_report += f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
         
         try:
-            await processing.edit_text(short_report, disable_web_page_preview=True)
+            await query.edit_message_text(short_report, disable_web_page_preview=True)
         except:
-            await processing.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
+            await query.edit_message_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome = """🤖 **ยินดีต้อนรับสู่ Stock Analysis Bot!** 📈
@@ -1699,6 +1748,7 @@ def main():
     application.add_handler(CommandHandler("aiplus", aiplus_command))
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
+    application.add_handler(CallbackQueryHandler(aiplus_button_callback, pattern="^aiplus_"))  # เพิ่มบรรทัดนี้
     application.add_error_handler(error_handler)
 
  
