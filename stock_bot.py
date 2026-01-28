@@ -1351,60 +1351,236 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ตรวจสอบว่ามี argument หรือไม่
     if not context.args or len(context.args) == 0:
-        # สร้างปุ่มเลือกหุ้นยอดนิยม
+        # สร้างเมนูหมวดหมู่หุ้น
         keyboard = [
-            [
-                InlineKeyboardButton("NVDA", callback_data="aiplus_NVDA"),
-                InlineKeyboardButton("AAPL", callback_data="aiplus_AAPL"),
-                InlineKeyboardButton("MSFT", callback_data="aiplus_MSFT"),
-            ],
-            [
-                InlineKeyboardButton("GOOGL", callback_data="aiplus_GOOGL"),
-                InlineKeyboardButton("META", callback_data="aiplus_META"),
-                InlineKeyboardButton("TSLA", callback_data="aiplus_TSLA"),
-            ],
-            [
-                InlineKeyboardButton("AMZN", callback_data="aiplus_AMZN"),
-                InlineKeyboardButton("NFLX", callback_data="aiplus_NFLX"),
-                InlineKeyboardButton("V", callback_data="aiplus_V"),
-            ],
-            [
-                InlineKeyboardButton("AVGO", callback_data="aiplus_AVGO"),
-                InlineKeyboardButton("RKLB", callback_data="aiplus_RKLB"),
-                InlineKeyboardButton("IVV", callback_data="aiplus_IVV"),
-            ],
+            [InlineKeyboardButton("🔥 ยอดนิยมสุด (Top Picks)", callback_data="cat_toppicks")],
+            [InlineKeyboardButton("🤖 AI & เทคโนโลยี", callback_data="cat_ai_tech")],
+            [InlineKeyboardButton("💰 การเงิน & FinTech", callback_data="cat_finance")],
+            [InlineKeyboardButton("🛒 อุปโภคบริโภค", callback_data="cat_consumer")],
+            [InlineKeyboardButton("🏥 สุขภาพ & ยา", callback_data="cat_healthcare")],
+            [InlineKeyboardButton("⚡ พลังงาน", callback_data="cat_energy")],
+            [InlineKeyboardButton("🚀 อวกาศ & กลาโหม", callback_data="cat_aerospace")],
+            [InlineKeyboardButton("📱 สื่อสาร & บันเทิง", callback_data="cat_media")],
+            [InlineKeyboardButton("🏭 อุตสาหกรรม", callback_data="cat_industrial")],
+            [InlineKeyboardButton("📊 ETF & กองทุน", callback_data="cat_etf")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         help_text = """🚀 **AI วิเคราะห์เต็มรูปแบบ (News + Technical)**
 
-**วิธีใช้:**
-1️⃣ กดปุ่มเลือกหุ้นด้านล่าง
-2️⃣ หรือพิมพ์ /aiplus SYMBOL
+**เลือกหมวดหมู่หุ้นที่สนใจ:**
 
-**ตัวอย่าง:**
-/aiplus AAPL
-/aiplus TSLA
-/aiplus V
-
-💡 **ความแตกต่างจาก /ai:**
+💡 **คุณสมบัติพิเศษ:**
 ✅ วิเคราะห์ครบมิติ - ทั้ง Fundamental (ข่าว) + Technical (กราฟ)
 ✅ ยืนยันสัญญาณ - ถ้าข่าวดีแต่เทคนิคขาลง = สัญญาณเตือน
 ✅ จับจังหวะซื้อขาย - รู้ว่าควรเข้าตอนไหน
+✅ คำแนะนำ Stop Loss & Take Profit
 ✅ ลดความเสี่ยง - ไม่พึ่งข้อมูลด้านเดียว
 
-⚡ ใช้ Gemini AI วิเคราะห์แบบรวม
+**หรือพิมพ์:** `/aiplus SYMBOL`
 
-👇 เลือกหุ้นยอดนิยม หรือพิมพ์ Symbol เอง"""
+⚡ ใช้ Gemini AI วิเคราะห์แบบรวม"""
         
+        await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
+        return
+    
+    # ถ้ามี argument ให้ทำการวิเคราะห์ตามปกติ
+    symbol = context.args[0].strip().upper()
+    
+    # Validate symbol
+    if len(symbol) < MIN_SYMBOL_LENGTH or len(symbol) > MAX_SYMBOL_LENGTH or not symbol.isalpha():
         await update.message.reply_text(
-            help_text, 
-            parse_mode='Markdown',
-            reply_markup=reply_markup
+            "❌ Symbol ไม่ถูกต้อง\nกรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /aiplus AAPL",
+            parse_mode='Markdown'
         )
         return
     
-    symbol = context.args[0].strip().upper()   
+    processing = await update.message.reply_text(
+        f"🚀 กำลังวิเคราะห์ {symbol} แบบเต็มรูปแบบ...\n"
+        f"⏳ กำลังรวบรวมข้อมูล:\n"
+        f"  • ข่าวล่าสุด\n"
+        f"  • ตัวชี้วัดเทคนิค\n"
+        f"  • ข้อมูลนักวิเคราะห์\n"
+        f"  • AI กำลังวิเคราะห์...",
+        parse_mode='Markdown'
+    )
+    
+    # เรียกใช้ฟังก์ชันวิเคราะห์
+    await perform_aiplus_analysis(processing, symbol)
+
+
+# เพิ่มฟังก์ชัน callback handler สำหรับจัดการปุ่ม
+async def stock_category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """จัดการ callback จากปุ่มเลือกหมวดหมู่"""
+    query = update.callback_query
+    await query.answer()
+    
+    category = query.data
+    
+    # Dictionary หมวดหมู่หุ้น (เพิ่มหุ้นเยอะขึ้น)
+    stock_categories = {
+        "cat_toppicks": {
+            "name": "🔥 ยอดนิยมสุด",
+            "stocks": [
+                ["NVDA", "AAPL", "MSFT"],
+                ["GOOGL", "META", "TSLA"],
+                ["AMZN", "NFLX", "AMD"],
+                ["AVGO", "V", "MA"]
+            ]
+        },
+        "cat_ai_tech": {
+            "name": "🤖 AI & เทคโนโลยี",
+            "stocks": [
+                ["NVDA", "AMD", "INTC"],
+                ["AVGO", "QCOM", "ASML"],
+                ["ORCL", "CRM", "NOW"],
+                ["ADBE", "PLTR", "SNOW"],
+                ["CRWD", "PANW", "NET"]
+            ]
+        },
+        "cat_finance": {
+            "name": "💰 การเงิน & FinTech",
+            "stocks": [
+                ["V", "MA", "PYPL"],
+                ["JPM", "BAC", "GS"],
+                ["MS", "C", "WFC"],
+                ["BLK", "SCHW", "AXP"],
+                ["SQ", "COIN", "SOFI"]
+            ]
+        },
+        "cat_consumer": {
+            "name": "🛒 อุปโภคบริโภค",
+            "stocks": [
+                ["WMT", "COST", "TGT"],
+                ["HD", "LOW", "NKE"],
+                ["SBUX", "MCD", "CMG"],
+                ["KO", "PEP", "PG"],
+                ["AMZN", "BABA", "JD"]
+            ]
+        },
+        "cat_healthcare": {
+            "name": "🏥 สุขภาพ & ยา",
+            "stocks": [
+                ["JNJ", "UNH", "LLY"],
+                ["PFE", "ABBV", "NVO"],
+                ["TMO", "ABT", "DHR"],
+                ["ISRG", "VRTX", "REGN"],
+                ["MDT", "BMY", "AMGN"]
+            ]
+        },
+        "cat_energy": {
+            "name": "⚡ พลังงาน",
+            "stocks": [
+                ["XOM", "CVX", "COP"],
+                ["SLB", "EOG", "PSX"],
+                ["MPC", "VLO", "OXY"],
+                ["FANG", "DVN", "HAL"],
+                ["ENPH", "SEDG", "RUN"]  # Solar
+            ]
+        },
+        "cat_aerospace": {
+            "name": "🚀 อวกาศ & กลาโหม",
+            "stocks": [
+                ["RKLB", "BA", "LMT"],
+                ["RTX", "NOC", "GD"],
+                ["LHX", "HII", "TDG"],
+                ["AVAV", "KTOS", "AJRD"]
+            ]
+        },
+        "cat_media": {
+            "name": "📱 สื่อสาร & บันเทิง",
+            "stocks": [
+                ["NFLX", "DIS", "PARA"],
+                ["WBD", "CMCSA", "T"],
+                ["VZ", "TMUS", "CHTR"],
+                ["SPOT", "RBLX", "EA"],
+                ["TTWO", "ATVI", "U"]
+            ]
+        },
+        "cat_industrial": {
+            "name": "🏭 อุตสาหกรรม",
+            "stocks": [
+                ["CAT", "DE", "GE"],
+                ["HON", "MMM", "EMR"],
+                ["UPS", "FEDEX", "CSX"],
+                ["NSC", "UNP", "CP"],
+                ["ITW", "ETN", "PH"]
+            ]
+        },
+        "cat_etf": {
+            "name": "📊 ETF & กองทุน",
+            "stocks": [
+                ["SPY", "QQQ", "IVV"],
+                ["VOO", "VTI", "DIA"],
+                ["IWM", "EEM", "VEA"],
+                ["GLD", "SLV", "TLT"],
+                ["ARKK", "ARKW", "ARKG"]
+            ]
+        }
+    }
+    
+    if category in stock_categories:
+        cat_data = stock_categories[category]
+        keyboard = []
+        
+        # สร้างปุ่มจากรายการหุ้น
+        for row in cat_data["stocks"]:
+            button_row = [
+                InlineKeyboardButton(symbol, callback_data=f"aiplus_{symbol}") 
+                for symbol in row
+            ]
+            keyboard.append(button_row)
+        
+        # ปุ่มกลับ
+        keyboard.append([InlineKeyboardButton("🔙 กลับเมนูหลัก", callback_data="back_to_main")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"{cat_data['name']} - เลือกหุ้นที่ต้องการวิเคราะห์:\n\n"
+            f"💡 กดปุ่มเพื่อให้ AI วิเคราะห์แบบรวม (ข่าว + เทคนิค)",
+            reply_markup=reply_markup
+        )
+    
+    elif category == "back_to_main":
+        # กลับไปเมนูหลัก
+        keyboard = [
+            [InlineKeyboardButton("🔥 ยอดนิยมสุด (Top Picks)", callback_data="cat_toppicks")],
+            [InlineKeyboardButton("🤖 AI & เทคโนโลยี", callback_data="cat_ai_tech")],
+            [InlineKeyboardButton("💰 การเงิน & FinTech", callback_data="cat_finance")],
+            [InlineKeyboardButton("🛒 อุปโภคบริโภค", callback_data="cat_consumer")],
+            [InlineKeyboardButton("🏥 สุขภาพ & ยา", callback_data="cat_healthcare")],
+            [InlineKeyboardButton("⚡ พลังงาน", callback_data="cat_energy")],
+            [InlineKeyboardButton("🚀 อวกาศ & กลาโหม", callback_data="cat_aerospace")],
+            [InlineKeyboardButton("📱 สื่อสาร & บันเทิง", callback_data="cat_media")],
+            [InlineKeyboardButton("🏭 อุตสาหกรรม", callback_data="cat_industrial")],
+            [InlineKeyboardButton("📊 ETF & กองทุน", callback_data="cat_etf")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🚀 **AI วิเคราะห์เต็มรูปแบบ**\n\n"
+            "**เลือกหมวดหมู่หุ้นที่สนใจ:**",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    
+    elif category.startswith("aiplus_"):
+        # เริ่มวิเคราะห์หุ้น
+        symbol = category.replace("aiplus_", "")
+        
+        await query.edit_message_text(
+            f"🚀 กำลังวิเคราะห์ {symbol} แบบเต็มรูปแบบ...\n"
+            f"⏳ กำลังรวบรวมข้อมูล:\n"
+            f"  • ข่าวล่าสุด\n"
+            f"  • ตัวชี้วัดเทคนิค\n"
+            f"  • ข้อมูลนักวิเคราะห์\n"
+            f"  • AI กำลังวิเคราะห์...",
+            parse_mode='Markdown'
+        )
+        
+        # เรียกใช้ฟังก์ชันวิเคราะห์
+        await perform_aiplus_analysis(query.message, symbol)
 
 
 async def aiplus_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1747,6 +1923,7 @@ def main():
     application.add_handler(CommandHandler("ai", ai_analysis_command))  
     application.add_handler(CommandHandler("aiplus", aiplus_command))
     application.add_handler(CommandHandler("health", health_check))
+    application.add_handler(CallbackQueryHandler(stock_category_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
     application.add_handler(CallbackQueryHandler(aiplus_button_callback, pattern="^aiplus_"))  # เพิ่มบรรทัดนี้
     application.add_error_handler(error_handler)
