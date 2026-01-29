@@ -23,185 +23,98 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # --- API Functions ---
 
-def get_quote(symbol, retries=2):
+def get_quote(symbol):
     """ดึงราคาปัจจุบัน"""
-    for attempt in range(retries + 1):
-        try:
-            _check_rate_limit('twelve_data')
-            _should_wait_before_api_call('twelve_data', min_interval=0.5)
-            
-            url = "https://api.twelvedata.com/quote"
-            params = {"symbol": symbol, "apikey": TWELVE_DATA_KEY}
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
-            
-            if data.get('status') == 'error':
-                error_msg = data.get('message', '')
-                if 'run out of API credits' in error_msg or 'rate limit' in error_msg.lower():
-                    if attempt < retries:
-                        logger.warning(f"⚠️ Rate limit hit, retrying in 5s... (attempt {attempt + 1}/{retries})")
-                        time.sleep(5)
-                        continue
-                logger.error(f"Quote error: {error_msg}")
-                return None
-            return data
-        except Exception as e:
-            if attempt < retries:
-                logger.warning(f"Error fetching quote (attempt {attempt + 1}/{retries}): {e}")
-                time.sleep(2)
-                continue
-            logger.error(f"Error fetching quote: {e}")
+    try:
+        url = "https://api.twelvedata.com/quote"
+        params = {"symbol": symbol, "apikey": TWELVE_DATA_KEY}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get('status') == 'error':
+            logger.error(f"Quote error: {data.get('message')}")
             return None
-    return None
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching quote: {e}")
+        return None
 
-def get_rsi(symbol, retries=2):
+def get_rsi(symbol):
     """ดึง RSI (14)"""
-    for attempt in range(retries + 1):
-        try:
-            _check_rate_limit('twelve_data')
-            _should_wait_before_api_call('twelve_data', min_interval=0.5)
-            
-            url = "https://api.twelvedata.com/rsi"
-            params = {
-                "symbol": symbol,
-                "interval": "1day",
-                "time_period": 14,
-                "apikey": TWELVE_DATA_KEY
-            }
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
-            
-            if data.get('status') == 'error':
-                error_msg = data.get('message', '')
-                if 'run out of API credits' in error_msg or 'rate limit' in error_msg.lower():
-                    if attempt < retries:
-                        logger.warning(f"⚠️ Rate limit hit for RSI, retrying in 5s...")
-                        time.sleep(5)
-                        continue
-                return None
-            
-            if data.get('status') == 'ok' and data.get('values'):
-                return float(data['values'][0]['rsi'])
-            return None
-        except Exception as e:
-            if attempt < retries:
-                logger.warning(f"Error fetching RSI (attempt {attempt + 1}/{retries}): {e}")
-                time.sleep(2)
-                continue
-            return None
-    return None
+    try:
+        url = "https://api.twelvedata.com/rsi"
+        params = {
+            "symbol": symbol,
+            "interval": "1day",
+            "time_period": 14,
+            "apikey": TWELVE_DATA_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get('status') == 'ok' and data.get('values'):
+            return float(data['values'][0]['rsi'])
+        return None
+    except:
+        return None
 
-def get_macd(symbol, retries=2):
+def get_macd(symbol):
     """ดึง MACD"""
-    for attempt in range(retries + 1):
-        try:
-            _check_rate_limit('twelve_data')
-            _should_wait_before_api_call('twelve_data', min_interval=0.5)
-            
-            url = "https://api.twelvedata.com/macd"
-            params = {
-                "symbol": symbol,
-                "interval": "1day",
-                "apikey": TWELVE_DATA_KEY
-            }
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
-            
-            if data.get('status') == 'error':
-                error_msg = data.get('message', '')
-                if 'run out of API credits' in error_msg or 'rate limit' in error_msg.lower():
-                    if attempt < retries:
-                        logger.warning(f"⚠️ Rate limit hit for MACD, retrying in 5s...")
-                        time.sleep(5)
-                        continue
-                return None, None
-            
-            if data.get('status') == 'ok' and data.get('values'):
-                latest = data['values'][0]
-                return float(latest['macd']), float(latest['macd_signal'])
-            return None, None
-        except Exception as e:
-            if attempt < retries:
-                logger.warning(f"Error fetching MACD (attempt {attempt + 1}/{retries}): {e}")
-                time.sleep(2)
-                continue
-            return None, None
-    return None, None
+    try:
+        url = "https://api.twelvedata.com/macd"
+        params = {
+            "symbol": symbol,
+            "interval": "1day",
+            "apikey": TWELVE_DATA_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get('status') == 'ok' and data.get('values'):
+            latest = data['values'][0]
+            return float(latest['macd']), float(latest['macd_signal'])
+        return None, None
+    except:
+        return None, None
 
-def get_ema(symbol, period, retries=2):
+def get_ema(symbol, period):
     """ดึง EMA"""
-    for attempt in range(retries + 1):
-        try:
-            _check_rate_limit('twelve_data')
-            _should_wait_before_api_call('twelve_data', min_interval=0.5)
-            
-            url = "https://api.twelvedata.com/ema"
-            params = {
-                "symbol": symbol,
-                "interval": "1day",
-                "time_period": period,
-                "apikey": TWELVE_DATA_KEY
-            }
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
-            
-            if data.get('status') == 'error':
-                error_msg = data.get('message', '')
-                if 'run out of API credits' in error_msg or 'rate limit' in error_msg.lower():
-                    if attempt < retries:
-                        logger.warning(f"⚠️ Rate limit hit for EMA, retrying in 5s...")
-                        time.sleep(5)
-                        continue
-                return None
-            
-            if data.get('status') == 'ok' and data.get('values'):
-                return float(data['values'][0]['ema'])
-            return None
-        except Exception as e:
-            if attempt < retries:
-                logger.warning(f"Error fetching EMA (attempt {attempt + 1}/{retries}): {e}")
-                time.sleep(2)
-                continue
-            return None
-    return None
+    try:
+        url = "https://api.twelvedata.com/ema"
+        params = {
+            "symbol": symbol,
+            "interval": "1day",
+            "time_period": period,
+            "apikey": TWELVE_DATA_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get('status') == 'ok' and data.get('values'):
+            return float(data['values'][0]['ema'])
+        return None
+    except:
+        return None
 
-def get_bbands(symbol, retries=2):
+def get_bbands(symbol):
     """ดึง Bollinger Bands"""
-    for attempt in range(retries + 1):
-        try:
-            _check_rate_limit('twelve_data')
-            _should_wait_before_api_call('twelve_data', min_interval=0.5)
-            
-            url = "https://api.twelvedata.com/bbands"
-            params = {
-                "symbol": symbol,
-                "interval": "1day",
-                "time_period": 20,
-                "apikey": TWELVE_DATA_KEY
-            }
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
-            
-            if data.get('status') == 'error':
-                error_msg = data.get('message', '')
-                if 'run out of API credits' in error_msg or 'rate limit' in error_msg.lower():
-                    if attempt < retries:
-                        logger.warning(f"⚠️ Rate limit hit for BBands, retrying in 5s...")
-                        time.sleep(5)
-                        continue
-                return None, None
-            
-            if data.get('status') == 'ok' and data.get('values'):
-                latest = data['values'][0]
-                return float(latest['lower_band']), float(latest['upper_band'])
-            return None, None
-        except Exception as e:
-            if attempt < retries:
-                logger.warning(f"Error fetching BBands (attempt {attempt + 1}/{retries}): {e}")
-                time.sleep(2)
-                continue
-            return None, None
-    return None, None
+    try:
+        url = "https://api.twelvedata.com/bbands"
+        params = {
+            "symbol": symbol,
+            "interval": "1day",
+            "time_period": 20,
+            "apikey": TWELVE_DATA_KEY
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get('status') == 'ok' and data.get('values'):
+            latest = data['values'][0]
+            return float(latest['lower_band']), float(latest['upper_band'])
+        return None, None
+    except:
+        return None, None
 
 def get_analyst_recommendations(symbol):
     """ดึงคำแนะนำจากนักวิเคราะห์ (จาก Finnhub)"""
@@ -1278,72 +1191,6 @@ CACHE_TTL_SECONDS = 300  # 5 minutes
 # Simple in-memory cache
 _analysis_cache = {}
 
-# เพิ่มหลัง _analysis_cache = {}
-_technical_cache = {}
-_cache_duration = 300  # 5 นาที
-
-def _get_cached_technical(symbol):
-    """ดึงข้อมูล technical จาก cache"""
-    if symbol in _technical_cache:
-        data, timestamp = _technical_cache[symbol]
-        if (datetime.now() - timestamp).total_seconds() < _cache_duration:
-            logger.info(f"✅ Cache hit for {symbol}")
-            return data
-        else:
-            logger.info(f"⏰ Cache expired for {symbol}")
-            del _technical_cache[symbol]
-    return None
-
-def _cache_technical(symbol, data):
-    """เก็บข้อมูล technical ใน cache"""
-    _technical_cache[symbol] = (data, datetime.now())
-    logger.info(f"💾 Cached technical data for {symbol}")
-
-import time
-from collections import defaultdict
-
-# Rate Limiting
-_api_call_tracker = defaultdict(list)
-_last_api_call = {}
-
-def _wait_for_rate_limit(wait_seconds=1):
-    """รอก่อนเรียก API ครั้งถัดไป"""
-    time.sleep(wait_seconds)
-
-def _should_wait_before_api_call(api_key='twelve_data', min_interval=0.5):
-    """เช็คว่าควรรอก่อนเรียก API หรือไม่"""
-    now = time.time()
-    if api_key in _last_api_call:
-        elapsed = now - _last_api_call[api_key]
-        if elapsed < min_interval:
-            wait_time = min_interval - elapsed
-            logger.info(f"⏳ Waiting {wait_time:.2f}s before next API call...")
-            time.sleep(wait_time)
-    _last_api_call[api_key] = time.time()
-
-def _clean_old_api_calls(window=60):
-    """ลบ API calls ที่เก่ากว่า window"""
-    now = time.time()
-    for key in list(_api_call_tracker.keys()):
-        _api_call_tracker[key] = [
-            t for t in _api_call_tracker[key] 
-            if now - t < window
-        ]
-
-def _check_rate_limit(api_key='twelve_data', max_calls=7, window=60):
-    """เช็ค rate limit และรอถ้าจำเป็น"""
-    _clean_old_api_calls(window)
-    
-    if len(_api_call_tracker[api_key]) >= max_calls:
-        oldest_call = _api_call_tracker[api_key][0]
-        wait_time = window - (time.time() - oldest_call) + 1
-        if wait_time > 0:
-            logger.warning(f"⚠️ Rate limit reached. Waiting {wait_time:.1f}s...")
-            time.sleep(wait_time)
-            _api_call_tracker[api_key] = []
-    
-    _api_call_tracker[api_key].append(time.time())
-
 def _get_cache_key(symbol: str) -> str:
     """Generate cache key for analysis"""
     return f"ai_analysis_{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}"
@@ -2136,273 +1983,143 @@ async def compare_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await processing.edit_text(short_report, disable_web_page_preview=True)
         except:
             await processing.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
-
-async def perform_aiplus_analysis(message, symbol):
-    """ฟังก์ชันวิเคราะห์แบบเต็มรูปแบบ (แยกออกมาจาก aiplus_command)"""
+            
+async def perform_aiplus_analysis(message, symbol: str):
+    """ฟังก์ชันหลักสำหรับวิเคราะห์แบบรวม (ใช้ร่วมกันได้ทั้ง command และ button)"""
     
     # ตรวจสอบ API Keys
     if not FINNHUB_KEY or FINNHUB_KEY == "":
-        keyboard = [[InlineKeyboardButton("🔙 กลับ", callback_data="back_to_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         await message.edit_text(
             "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
             "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
             "รับ Free API Key: https://finnhub.io/register",
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return
     
     if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-        keyboard = [[InlineKeyboardButton("🔙 กลับ", callback_data="back_to_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         await message.edit_text(
             "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
             "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
             "รับ Free API Key: https://makersuite.google.com/app/apikey",
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return
     
     if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
-        keyboard = [[InlineKeyboardButton("🔙 กลับ", callback_data="back_to_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         await message.edit_text(
             "⚠️ **ไม่พบ TWELVE_DATA_KEY**\n\n"
             "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment\n"
             "รับ Free API Key: https://twelvedata.com/apikey",
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return
     
+    # 1. ดึงข้อมูลข่าว
+    news_data = get_company_news(symbol, days=NEWS_DAYS_RANGE)
+    
+    if not news_data or len(news_data) == 0:
+        await message.edit_text(
+            f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Symbol ไม่ถูกต้อง\n"
+            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
+            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 2. ดึงข้อมูลเทคนิค
+    quote = get_quote(symbol)
+    if not quote or 'close' not in quote:
+        await message.edit_text(
+            f"❌ ไม่สามารถดึงข้อมูลเทคนิคของ {symbol} ได้\n\n"
+            f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # เก็บข้อมูลเทคนิค
+    current = float(quote['close'])
+    prev_close = float(quote.get('previous_close', current))
+    change = current - prev_close
+    change_pct = (change / prev_close) * 100
+    
+    technical_data = {
+        'current': current,
+        'change_pct': change_pct,
+        'rsi': get_rsi(symbol),
+        'macd': None,
+        'macd_signal': None,
+        'ema_20': get_ema(symbol, 20),
+        'ema_50': get_ema(symbol, 50),
+        'ema_200': get_ema(symbol, 200),
+        'bb_lower': None,
+        'bb_upper': None,
+        'bb_position': None,
+        'analyst_buy_pct': None,
+        'upside_pct': None
+    }
+    
+    # MACD
+    macd, macd_signal = get_macd(symbol)
+    if macd is not None:
+        technical_data['macd'] = macd
+        technical_data['macd_signal'] = macd_signal
+    
+    # Bollinger Bands
+    bb_lower, bb_upper = get_bbands(symbol)
+    if bb_lower and bb_upper:
+        technical_data['bb_lower'] = bb_lower
+        technical_data['bb_upper'] = bb_upper
+        technical_data['bb_position'] = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
+    
+    # Analyst recommendations
+    recommendations = get_analyst_recommendations(symbol)
+    if recommendations:
+        buy = recommendations.get('buy', 0)
+        hold = recommendations.get('hold', 0)
+        sell = recommendations.get('sell', 0)
+        total = buy + hold + sell
+        if total > 0:
+            technical_data['analyst_buy_pct'] = (buy / total) * 100
+    
+    # Price target
+    price_target = get_price_target(symbol)
+    if price_target and price_target['target_mean']:
+        target_mean = price_target['target_mean']
+        technical_data['upside_pct'] = ((target_mean - current) / current) * 100
+    
+    # 3. แปลข่าว
+    news_data = translate_news_batch(news_data)
+    
+    # 4. วิเคราะห์ด้วย AI แบบรวม
+    combined_analysis = analyze_combined_with_gemini(news_data, symbol, technical_data)
+    
+    if not combined_analysis:
+        await message.edit_text(
+            f"❌ **ไม่สามารถวิเคราะห์ได้**\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Gemini API มีปัญหา\n"
+            f"• API Key ไม่ถูกต้อง\n"
+            f"• Network error\n\n"
+            f"💡 ลอง /ai {symbol} หรือ /news {symbol}",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 5. สร้างรายงาน
+    report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
+    report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
+    report += combined_analysis
+    report += f"\n\n{'─'*35}\n"
+    report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
+    report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    report += f"💡 ข่าว: /news {symbol}"
+    
     try:
-        # 1. ดึงข้อมูลข่าว
-        logger.info(f"📰 Fetching news for {symbol}...")
-        news_data = get_company_news(symbol, days=NEWS_DAYS_RANGE)
-        
-        if not news_data or len(news_data) == 0:
-            keyboard = [[InlineKeyboardButton("🔙 เลือกหุ้นใหม่", callback_data="back_to_main")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await message.edit_text(
-                f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
-                f"อาจเป็นเพราะ:\n"
-                f"• Symbol ไม่ถูกต้อง\n"
-                f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
-                f"💡 ลองเลือกหุ้นอื่น",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            return
-        
-        # 2. เช็ค cache ก่อน
-        cached_data = _get_cached_technical(symbol)
-        
-        if cached_data:
-            logger.info(f"📦 Using cached technical data for {symbol}")
-            technical_data = cached_data
-            current = technical_data['current']
-            change_pct = technical_data['change_pct']
-        else:
-            logger.info(f"🔄 Fetching fresh technical data for {symbol}")
-            
-            # 2. ดึงข้อมูลเทคนิค
-            quote = get_quote(symbol)
-            
-            if not quote or 'close' not in quote:
-                keyboard = [
-                    [InlineKeyboardButton("🔄 ลองอีกครั้ง", callback_data=f"aiplus_{symbol}")],
-                    [InlineKeyboardButton("🔙 เลือกหุ้นใหม่", callback_data="back_to_main")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await message.edit_text(
-                    f"⚠️ **API Rate Limit หรือข้อมูลไม่พร้อม**\n\n"
-                    f"ไม่สามารถดึงข้อมูล {symbol} ได้ในขณะนี้\n\n"
-                    f"**เหตุผลที่เป็นไปได้:**\n"
-                    f"• API Rate Limit (เกิน 8 calls/นาที)\n"
-                    f"• Symbol ไม่ถูกต้อง\n"
-                    f"• เครือข่ายขัดข้อง\n\n"
-                    f"💡 **วิธีแก้:**\n"
-                    f"• รอ 30-60 วินาที แล้วลองอีกครั้ง\n"
-                    f"• เลือกหุ้นอื่นก่อน",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-                return
-            
-            # เก็บข้อมูลเทคนิค
-            current = float(quote['close'])
-            prev_close = float(quote.get('previous_close', current))
-            change = current - prev_close
-            change_pct = (change / prev_close) * 100
-            
-            logger.info(f"💰 {symbol} Price: ${current:.2f} ({change_pct:+.2f}%)")
-            
-            # เริ่มดึงข้อมูลตัวชี้วัด
-            technical_data = {
-                'current': current,
-                'change_pct': change_pct,
-                'rsi': None,
-                'macd': None,
-                'macd_signal': None,
-                'ema_20': None,
-                'ema_50': None,
-                'ema_200': None,
-                'bb_lower': None,
-                'bb_upper': None,
-                'bb_position': None,
-                'analyst_buy_pct': None,
-                'upside_pct': None
-            }
-            
-            # RSI
-            logger.info(f"📊 Fetching RSI for {symbol}...")
-            rsi = get_rsi(symbol)
-            if rsi is not None:
-                technical_data['rsi'] = rsi
-                logger.info(f"✅ RSI: {rsi:.1f}")
-            else:
-                logger.warning(f"⚠️ RSI data not available for {symbol}")
-            
-            # MACD
-            logger.info(f"📊 Fetching MACD for {symbol}...")
-            macd, macd_signal = get_macd(symbol)
-            if macd is not None and macd_signal is not None:
-                technical_data['macd'] = macd
-                technical_data['macd_signal'] = macd_signal
-                logger.info(f"✅ MACD: {macd:.2f}, Signal: {macd_signal:.2f}")
-            else:
-                logger.warning(f"⚠️ MACD data not available for {symbol}")
-            
-            # EMA 20
-            logger.info(f"📊 Fetching EMA 20 for {symbol}...")
-            ema_20 = get_ema(symbol, 20)
-            if ema_20 is not None:
-                technical_data['ema_20'] = ema_20
-                logger.info(f"✅ EMA 20: ${ema_20:.2f}")
-            else:
-                logger.warning(f"⚠️ EMA 20 data not available for {symbol}")
-            
-            # EMA 50
-            logger.info(f"📊 Fetching EMA 50 for {symbol}...")
-            ema_50 = get_ema(symbol, 50)
-            if ema_50 is not None:
-                technical_data['ema_50'] = ema_50
-                logger.info(f"✅ EMA 50: ${ema_50:.2f}")
-            else:
-                logger.warning(f"⚠️ EMA 50 data not available for {symbol}")
-            
-            # EMA 200
-            logger.info(f"📊 Fetching EMA 200 for {symbol}...")
-            ema_200 = get_ema(symbol, 200)
-            if ema_200 is not None:
-                technical_data['ema_200'] = ema_200
-                logger.info(f"✅ EMA 200: ${ema_200:.2f}")
-            else:
-                logger.warning(f"⚠️ EMA 200 data not available for {symbol}")
-            
-            # Bollinger Bands
-            logger.info(f"📊 Fetching Bollinger Bands for {symbol}...")
-            bb_lower, bb_upper = get_bbands(symbol)
-            if bb_lower is not None and bb_upper is not None:
-                technical_data['bb_lower'] = bb_lower
-                technical_data['bb_upper'] = bb_upper
-                bb_position = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
-                technical_data['bb_position'] = bb_position
-                logger.info(f"✅ BB Lower: ${bb_lower:.2f}, Upper: ${bb_upper:.2f}, Position: {bb_position:.1f}%")
-            else:
-                logger.warning(f"⚠️ Bollinger Bands data not available for {symbol}")
-            
-            # Analyst recommendations
-            logger.info(f"📊 Fetching Analyst Recommendations for {symbol}...")
-            recommendations = get_analyst_recommendations(symbol)
-            if recommendations:
-                buy = recommendations.get('buy', 0)
-                hold = recommendations.get('hold', 0)
-                sell = recommendations.get('sell', 0)
-                total = buy + hold + sell
-                if total > 0:
-                    buy_pct = (buy / total) * 100
-                    technical_data['analyst_buy_pct'] = buy_pct
-                    logger.info(f"✅ Analyst Buy: {buy_pct:.0f}%")
-            else:
-                logger.warning(f"⚠️ Analyst data not available for {symbol}")
-            
-            # Price target
-            logger.info(f"📊 Fetching Price Target for {symbol}...")
-            price_target = get_price_target(symbol)
-            if price_target and price_target['target_mean']:
-                target_mean = price_target['target_mean']
-                upside_pct = ((target_mean - current) / current) * 100
-                technical_data['upside_pct'] = upside_pct
-                logger.info(f"✅ Price Target: ${target_mean:.2f}, Upside: {upside_pct:+.1f}%")
-            else:
-                logger.warning(f"⚠️ Price target data not available for {symbol}")
-            
-            # เก็บใน cache
-            _cache_technical(symbol, technical_data)
-            logger.info(f"💾 Cached technical data for {symbol}")
-        
-        # 3. แปลข่าว
-        logger.info(f"🌐 Translating news for {symbol}...")
-        news_data = translate_news_batch(news_data)
-        
-        # 4. วิเคราะห์ด้วย AI แบบรวม
-        logger.info(f"🤖 Starting AI analysis for {symbol}...")
-        combined_analysis = analyze_combined_with_gemini(news_data, symbol, technical_data)
-        
-        if not combined_analysis:
-            keyboard = [
-                [InlineKeyboardButton("🔄 ลองอีกครั้ง", callback_data=f"aiplus_{symbol}")],
-                [InlineKeyboardButton("🔙 เลือกหุ้นใหม่", callback_data="back_to_main")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await message.edit_text(
-                f"❌ **ไม่สามารถวิเคราะห์ได้**\n\n"
-                f"อาจเป็นเพราะ:\n"
-                f"• Gemini API มีปัญหา\n"
-                f"• API Key ไม่ถูกต้อง\n"
-                f"• Network error\n\n"
-                f"💡 ลองอีกครั้งหรือเลือกหุ้นอื่น",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            return
-        
-        logger.info(f"✅ AI analysis completed for {symbol}")
-        
-        # 5. สร้างรายงาน
-        report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
-        report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
-        
-        # AI Analysis
-        report += combined_analysis
-        
-        # Footer
-        report += f"\n\n{'─'*35}\n" 
-        report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
-        report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        
-        # เพิ่มปุ่มด้านล่าง
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 วิเคราะห์อีกครั้ง", callback_data=f"aiplus_{symbol}"),
-                InlineKeyboardButton("📰 ดูข่าว", callback_data=f"news_{symbol}")
-            ],
-            [InlineKeyboardButton("🔙 เลือกหุ้นอื่น", callback_data="back_to_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-         
-        # เช็คความยาวก่อนส่ง
         if len(report) > 4000:
-            logger.warning(f"⚠️ Report too long ({len(report)} chars), splitting...")
-            # แบ่งส่งทันที
             max_length = 3500
-            
             first_part = report[:max_length]
             last_newline = first_part.rfind('\n')
             if last_newline > 3000:
@@ -2414,45 +2131,27 @@ async def perform_aiplus_analysis(message, symbol):
             
             await message.edit_text(first_part, disable_web_page_preview=True)
             
-            # ส่งส่วนที่ 2 พร้อมปุ่ม
-            await message.reply_text(
-                second_part, 
-                reply_markup=reply_markup, 
+            # Get chat_id from message
+            chat_id = message.chat_id if hasattr(message, 'chat_id') else message.chat.id
+            await message.get_bot().send_message(
+                chat_id=chat_id,
+                text=second_part,
                 disable_web_page_preview=True
             )
-            logger.info(f"✅ Report sent in 2 parts")
         else:
-            await message.edit_text(
-                report, 
-                reply_markup=reply_markup, 
-                disable_web_page_preview=True
-            )
-            logger.info(f"✅ Report sent successfully")
+            await message.edit_text(report, disable_web_page_preview=True)
             
     except Exception as e:
-        logger.error(f"❌ Error in perform_aiplus_analysis: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        
-        keyboard = [
-            [InlineKeyboardButton("🔄 ลองอีกครั้ง", callback_data=f"aiplus_{symbol}")],
-            [InlineKeyboardButton("🔙 กลับ", callback_data="back_to_main")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        logger.error(f"Error sending aiplus analysis: {e}")
+        short_report = f"🤖 AI วิเคราะห์ {symbol.upper()}\n"
+        short_report += f"💰 ${current:.2f} ({change_pct:+.2f}%)\n\n"
+        short_report += combined_analysis[:3000] + "\n\n...(ตัดข้อความ)\n\n"
+        short_report += f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
         
         try:
-            await message.edit_text(
-                f"❌ **เกิดข้อผิดพลาด**\n\n"
-                f"ไม่สามารถวิเคราะห์ {symbol} ได้\n\n"
-                f"**Error:** {str(e)[:100]}\n\n"
-                f"กรุณาลองอีกครั้งหรือติดต่อผู้ดูแลระบบ",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
+            await message.edit_text(short_report, disable_web_page_preview=True)
         except:
-            logger.error("Failed to send error message to user")
-            pass
-             
+            await message.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
 
 # เพิ่มฟังก์ชัน callback handler สำหรับจัดการปุ่ม
 async def stock_category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
