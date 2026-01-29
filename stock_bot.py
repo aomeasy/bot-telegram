@@ -20,6 +20,7 @@ TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")  
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")  # เพิ่มบรรทัดนี้
 
 # --- API Functions ---
 
@@ -187,49 +188,80 @@ def get_company_news(symbol, days=7):
         logger.error(f"Error fetching company news: {e}")
         return None
 
-
-
-def analyze_combined_with_gemini(news_list, symbol, technical_data):
-    """วิเคราะห์แบบรวม: ข่าว + เทคนิค ด้วย Gemini AI"""
+def analyze_with_groq(prompt, context_name="analysis"):
+    """วิเคราะห์ด้วย Groq API (Fallback)"""
     try:
-        if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-            logger.warning("⚠️ No Gemini API key found - skipping AI analysis")
+        if not GROQ_API_KEY or GROQ_API_KEY == "":
+            logger.warning("⚠️ No Groq API key found")
             return None
         
-        logger.info(f"🔍 Starting Combined Gemini analysis for {symbol}...")
+        logger.info(f"🔄 Switching to Groq API for {context_name}...")
         
         try:
-            import google.generativeai as genai
+            from groq import Groq
         except ImportError as e:
-            logger.error(f"❌ Cannot import google.generativeai: {e}")
+            logger.error(f"❌ Cannot import groq: {e}")
+            logger.info("💡 Install with: pip install groq")
             return None
         
-        genai.configure(api_key=GEMINI_API_KEY)
+        client = Groq(api_key=GROQ_API_KEY)
         
-        # ใช้โมเดลเดียวกับ analyze_news_with_gemini
+        # ลองใช้โมเดลตามลำดับ
         model_names = [
-            'models/gemini-2.5-flash',
-            'models/gemini-flash-latest',
-            'models/gemini-2.0-flash',
-            'models/gemini-2.5-pro',
-            'models/gemini-pro-latest',
+            "llama-3.3-70b-versatile",
+            "llama-3.1-70b-versatile",
+            "mixtral-8x7b-32768",
+            "llama-3.1-8b-instant"
         ]
         
-        model = None
         for model_name in model_names:
             try:
-                model = genai.GenerativeModel(model_name)
-                logger.info(f"✅ Using Gemini model: {model_name}")
-                break
+                logger.info(f"✅ Trying Groq model: {model_name}")
+                
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ],
+                    model=model_name,
+                    temperature=0.7,
+                    max_tokens=8000,
+                )
+                
+                if chat_completion.choices and len(chat_completion.choices) > 0:
+                    result = chat_completion.choices[0].message.content
+                    logger.info(f"✅ Groq API responded with {len(result)} characters")
+                    return result.strip()
+                    
             except Exception as e:
-                logger.warning(f"⚠️ Cannot use {model_name}: {e}")
+                logger.warning(f"⚠️ Groq model {model_name} failed: {e}")
                 continue
         
-        if model is None:
-            logger.error("❌ Cannot initialize any Gemini model")
+        logger.error("❌ All Groq models failed")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Groq API error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+def analyze_combined_with_gemini(news_list, symbol, technical_data):
+    """วิเคราะห์แบบรวม: ข่าว + เทคนิค ด้วย Gemini AI (มี Groq fallback)"""
+    try:
+        # ตรวจสอบ API Keys
+        has_gemini = GEMINI_API_KEY and GEMINI_API_KEY != ""
+        has_groq = GROQ_API_KEY and GROQ_API_KEY != ""
+        
+        if not has_gemini and not has_groq:
+            logger.warning("⚠️ No AI API key found (Gemini or Groq)")
             return None
         
-        # เตรียมข้อมูลข่าว
+        logger.info(f"🔍 Starting Combined AI analysis for {symbol}...")
+        
+        # เตรียม prompt (ย้ายมาด้านบนเพื่อใช้ร่วมกัน)
         news_text = f"ข่าวล่าสุดของหุ้น {symbol} (5 ข่าวล่าสุด):\n\n"
         for i, news in enumerate(news_list[:5], 1):
             headline = news.get('headline_th', news.get('headline', ''))
@@ -292,7 +324,7 @@ def analyze_combined_with_gemini(news_list, symbol, technical_data):
             tech_text += f"\nValuation:\n"
             tech_text += f"  Upside Potential: {technical_data['upside_pct']:+.1f}%\n"
         
-        # Prompt ที่รวมทั้งข่าวและเทคนิค
+        # Prompt เต็ม (ใช้เดิม)
         prompt = f"""{news_text}
 
 {tech_text}
@@ -415,146 +447,89 @@ PART 4: สรุปรวมและคำแนะนำ
 - ใช้ separator ───── หรือ ═════ แบ่งส่วน
 - ใช้เพียง emoji และข้อความธรรมดา
 
-═══════════════════════════════════
-ตัวอย่างการตอบที่ถูกต้อง
-═══════════════════════════════════
-
-PART 1: วิเคราะห์จากข่าว
-🟢 ข่าวดี 60% (3 ข่าว) | 🟡 ข่าวกลาง 20% (1 ข่าว) | 🔴 ข่าวไม่ดี 20% (1 ข่าว)
-
-สรุป: มีข่าวเชิงบวกเรื่องการขยายตลาดในเอเชียและเพิ่มพันธมิตรใหม่ 
-แต่มีความกังวลเรื่องการแข่งขันจาก Fintech และ Crypto payment
-
-คะแนน News Sentiment: +4/10 (ค่อนข้างบวก)
-
-─────────────────────────────────
-
-PART 2: วิเคราะห์จากเทคนิค
-🔴 สัญญาณรวม: Bearish (แนวโน้มลง)
-
-ตัวชี้วัด:
-- RSI: 33.8 (ใกล้ Oversold แต่ยังไม่ถึง 30)
-- MACD: Bearish (MACD ต่ำกว่า Signal)
-- EMA: Downtrend (ราคาต่ำกว่า EMA 20, 50, 200)
-- Bollinger Bands: อยู่ที่ 19% (ใกล้ขอบล่าง)
-
-แนวรับ/แนวต้าน:
-- Support: $316.70 (ห่างจากราคาปัจจุบัน 3%)
-- Resistance: $367.78 (ห่างจากราคาปัจจุบัน 13%)
-
-ตำแหน่งราคา: อยู่ใกล้แนวรับ มีแนวโน้มทดสอบ Support
-
-คะแนน Technical Score: -5/10 (Bearish)
-
-─────────────────────────────────
-
-PART 3: Valuation & Analyst View
-Upside Potential: +8.5%
-นักวิเคราะห์: 82% แนะนำซื้อ
-
-Margin of Safety: ปานกลาง (ราคาต่ำกว่าเป้าหมาย แต่ไม่มาก)
-
-─────────────────────────────────
-
-PART 4: สรุปรวมและคำแนะนำ
-
-⚠️ สถานการณ์ขัดแย้ง!
-- ข่าว: เป็นบวก 60% (+4/10)
-- เทคนิค: Bearish ชัดเจน (-5/10)
-- นักวิเคราะห์: มองบวก 82%
-
-ระดับความเสี่ยง: 🟡 กลาง
-
-คำแนะนำการเทรด:
-
-📊 Timeframe: Short-term (1-2 สัปดาห์)
-
-🎯 Action: 🟡 รอดู (WAIT)
-
-เหตุผล: แม้ข่าวและนักวิเคราะห์มองบวก แต่สัญญาณเทคนิคชี้ 
-ว่ากำลังขาลงอย่างชัดเจน ในระยะสั้นควรรอให้สัญญาณกลับตัวก่อน
-
-💰 จุดเข้าที่แนะนำ:
-- รอราคาลงใกล้ $316-320 (แนวรับ)
-- หรือรอ RSI ต่ำกว่า 30 (Oversold แท้)
-- หรือรอ MACD กลับเป็น Bullish
-
-🛡️ Stop Loss: $310 (ต่ำกว่าแนวรับ 2%)
-
-🎯 Take Profit:
-- TP1: $340 (+4%)
-- TP2: $360 (+10%)
-
-คะแนนความเชื่อมั่นรวม: +1/10 (ระมัดระวัง - รอดูก่อน)
-
-สรุป: ข่าวดีแต่เทคนิคยังไม่รองรับ ควรรอราคาปรับฐานและ
-สัญญาณเทคนิคกลับตัวก่อนเข้าลงทุน
-
-═════════════════════════════════
-
 เริ่มวิเคราะห์:
 
 """
-
-        logger.info("🚀 Calling Gemini API for combined analysis...")
         
-        response = model.generate_content(prompt)
+        # ลอง Gemini ก่อน
+        if has_gemini:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=GEMINI_API_KEY)
+                
+                model_names = [
+                    'models/gemini-2.5-flash',
+                    'models/gemini-flash-latest',
+                    'models/gemini-2.0-flash',
+                    'models/gemini-2.5-pro',
+                    'models/gemini-pro-latest',
+                ]
+                
+                for model_name in model_names:
+                    try:
+                        model = genai.GenerativeModel(model_name)
+                        logger.info(f"✅ Using Gemini model: {model_name}")
+                        
+                        logger.info("🚀 Calling Gemini API for combined analysis...")
+                        response = model.generate_content(prompt)
+                        
+                        if response and hasattr(response, 'text') and response.text:
+                            logger.info(f"📊 Combined analysis result length: {len(response.text)} characters")
+                            return response.text.strip()
+                            
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        
+                        # ตรวจสอบ Rate Limit Error
+                        if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "resource_exhausted" in error_msg:
+                            logger.warning(f"⚠️ Gemini rate limit exceeded: {e}")
+                            logger.info("🔄 Switching to Groq API...")
+                            break  # ออกจาก loop และไปใช้ Groq
+                        else:
+                            logger.warning(f"⚠️ Gemini model {model_name} failed: {e}")
+                            continue
+                
+            except ImportError as e:
+                logger.error(f"❌ Cannot import google.generativeai: {e}")
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg:
+                    logger.warning(f"⚠️ Gemini rate limit exceeded: {e}")
+                    logger.info("🔄 Switching to Groq API...")
+                else:
+                    logger.error(f"❌ Gemini error: {e}")
         
-        logger.info("✅ Gemini API responded")
+        # ถ้า Gemini ล้มเหลว ให้ใช้ Groq
+        if has_groq:
+            logger.info("🔄 Falling back to Groq API...")
+            result = analyze_with_groq(prompt, f"combined analysis for {symbol}")
+            if result:
+                return result
         
-        if response and hasattr(response, 'text') and response.text:
-            logger.info(f"📊 Combined analysis result length: {len(response.text)} characters")
-            return response.text.strip()
-        else:
-            logger.warning("⚠️ Gemini returned empty response")
-            return None
+        logger.error("❌ All AI APIs failed")
+        return None
         
     except Exception as e:
-        logger.error(f"❌ Combined Gemini analysis error: {e}")
+        logger.error(f"❌ Combined analysis error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return None
 
 
 
+
 def analyze_comparison_with_gemini(stock1_data, stock2_data, symbol1, symbol2):
-    """วิเคราะห์เปรียบเทียบ 2 หุ้นด้วย Gemini AI"""
+    """วิเคราะห์เปรียบเทียบ 2 หุ้นด้วย Gemini AI (มี Groq fallback)"""
     try:
-        if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-            logger.warning("⚠️ No Gemini API key found - skipping AI comparison")
+        # ตรวจสอบ API Keys
+        has_gemini = GEMINI_API_KEY and GEMINI_API_KEY != ""
+        has_groq = GROQ_API_KEY and GROQ_API_KEY != ""
+        
+        if not has_gemini and not has_groq:
+            logger.warning("⚠️ No AI API key found (Gemini or Groq) - skipping comparison")
             return None
         
         logger.info(f"🔍 Starting Gemini comparison analysis: {symbol1} vs {symbol2}...")
-        
-        try:
-            import google.generativeai as genai
-        except ImportError as e:
-            logger.error(f"❌ Cannot import google.generativeai: {e}")
-            return None
-        
-        genai.configure(api_key=GEMINI_API_KEY)
-        
-        model_names = [
-            'models/gemini-2.5-flash',
-            'models/gemini-flash-latest',
-            'models/gemini-2.0-flash',
-            'models/gemini-2.5-pro',
-            'models/gemini-pro-latest',
-        ]
-        
-        model = None
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name)
-                logger.info(f"✅ Using Gemini model: {model_name}")
-                break
-            except Exception as e:
-                logger.warning(f"⚠️ Cannot use {model_name}: {e}")
-                continue
-        
-        if model is None:
-            logger.error("❌ Cannot initialize any Gemini model")
-            return None
         
         # ฟังก์ชันช่วยจัดรูปแบบตัวเลข (ป้องกัน None)
         def safe_format(value, format_spec=':.2f', default='N/A'):
@@ -800,25 +775,76 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
 
 เริ่มวิเคราะห์:
 """
-
-        logger.info("🚀 Calling Gemini API for comparison analysis...")
         
-        response = model.generate_content(prompt)
+        # ลอง Gemini ก่อน
+        if has_gemini:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=GEMINI_API_KEY)
+                
+                model_names = [
+                    'models/gemini-2.5-flash',
+                    'models/gemini-flash-latest',
+                    'models/gemini-2.0-flash',
+                    'models/gemini-2.5-pro',
+                    'models/gemini-pro-latest',
+                ]
+                
+                for model_name in model_names:
+                    try:
+                        model = genai.GenerativeModel(model_name)
+                        logger.info(f"✅ Using Gemini model: {model_name}")
+                        
+                        logger.info("🚀 Calling Gemini API for comparison analysis...")
+                        response = model.generate_content(prompt)
+                        
+                        logger.info("✅ Gemini API responded")
+                        
+                        if response and hasattr(response, 'text') and response.text:
+                            logger.info(f"📊 Comparison analysis result length: {len(response.text)} characters")
+                            return response.text.strip()
+                        else:
+                            logger.warning("⚠️ Gemini returned empty response")
+                            continue
+                            
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        
+                        # ตรวจสอบ Rate Limit Error
+                        if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "resource_exhausted" in error_msg:
+                            logger.warning(f"⚠️ Gemini rate limit exceeded on {model_name}: {e}")
+                            logger.info("🔄 Switching to Groq API...")
+                            break  # ออกจาก loop และไปใช้ Groq
+                        else:
+                            logger.warning(f"⚠️ Gemini model {model_name} failed: {e}")
+                            continue
+                
+            except ImportError as e:
+                logger.error(f"❌ Cannot import google.generativeai: {e}")
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "resource_exhausted" in error_msg:
+                    logger.warning(f"⚠️ Gemini rate limit exceeded: {e}")
+                    logger.info("🔄 Switching to Groq API...")
+                else:
+                    logger.error(f"❌ Gemini comparison error: {e}")
         
-        logger.info("✅ Gemini API responded")
+        # ถ้า Gemini ล้มเหลว ให้ใช้ Groq
+        if has_groq:
+            logger.info("🔄 Falling back to Groq API for comparison...")
+            result = analyze_with_groq(prompt, f"comparison {symbol1} vs {symbol2}")
+            if result:
+                return result
         
-        if response and hasattr(response, 'text') and response.text:
-            logger.info(f"📊 Comparison analysis result length: {len(response.text)} characters")
-            return response.text.strip()
-        else:
-            logger.warning("⚠️ Gemini returned empty response")
-            return None
+        logger.error("❌ All AI APIs failed for comparison")
+        return None
         
     except Exception as e:
         logger.error(f"❌ Comparison Gemini analysis error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return None
+ 
 
 async def get_stock_data_for_comparison(symbol):
     """ดึงข้อมูลหุ้นสำหรับการเปรียบเทียบ"""
@@ -901,47 +927,20 @@ async def get_stock_data_for_comparison(symbol):
     except Exception as e:
         logger.error(f"Error getting stock data for {symbol}: {e}")
         return None
-        
+
+
 def analyze_news_with_gemini(news_list, symbol):
-    """วิเคราะห์ข่าวด้วย Gemini AI"""
+    """วิเคราะห์ข่าวด้วย Gemini AI (มี Groq fallback)"""
     try:
-        # เช็ค API Key
-        if not GEMINI_API_KEY or GEMINI_API_KEY == "":
-            logger.warning("⚠️ No Gemini API key found - skipping AI analysis")
+        # ตรวจสอบ API Keys
+        has_gemini = GEMINI_API_KEY and GEMINI_API_KEY != ""
+        has_groq = GROQ_API_KEY and GROQ_API_KEY != ""
+        
+        if not has_gemini and not has_groq:
+            logger.warning("⚠️ No AI API key found (Gemini or Groq) - skipping news analysis")
             return None
         
-        logger.info(f"🔍 Starting Gemini analysis for {symbol}...")
-        
-        try:
-            import google.generativeai as genai
-        except ImportError as e:
-            logger.error(f"❌ Cannot import google.generativeai: {e}")
-            return None
-        
-        genai.configure(api_key=GEMINI_API_KEY)
-        
-        # ✅ ใช้โมเดลที่ใช้งานได้จริง (เรียงตามความเร็วและประสิทธิภาพ)
-        model_names = [
-            'models/gemini-2.5-flash',          # แนะนำ - เร็วและดี
-            'models/gemini-flash-latest',       # ทางเลือกที่ 2
-            'models/gemini-2.0-flash',          # ทางเลือกที่ 3
-            'models/gemini-2.5-pro',            # ดีที่สุดแต่ช้ากว่า
-            'models/gemini-pro-latest',         # fallback
-        ]
-        
-        model = None
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name)
-                logger.info(f"✅ Using Gemini model: {model_name}")
-                break
-            except Exception as e:
-                logger.warning(f"⚠️ Cannot use {model_name}: {e}")
-                continue
-        
-        if model is None:
-            logger.error("❌ Cannot initialize any Gemini model")
-            return None
+        logger.info(f"🔍 Starting AI news analysis for {symbol}...")
         
         # เตรียมข้อมูลข่าว
         news_text = f"ข่าวล่าสุดของหุ้น {symbol}:\n\n"
@@ -975,23 +974,75 @@ def analyze_news_with_gemini(news_list, symbol):
    - +5 ถึง +10 = ข่าวดีมาก
 
 ตอบเป็นภาษาไทยที่เข้าใจง่าย กระชับ ตรงประเด็น"""
-
-        logger.info("🚀 Calling Gemini API...")
         
-        # Generate content
-        response = model.generate_content(prompt)
+        # ลอง Gemini ก่อน
+        if has_gemini:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=GEMINI_API_KEY)
+                
+                # ใช้โมเดลที่ใช้งานได้จริง
+                model_names = [
+                    'models/gemini-2.5-flash',          # แนะนำ - เร็วและดี
+                    'models/gemini-flash-latest',       # ทางเลือกที่ 2
+                    'models/gemini-2.0-flash',          # ทางเลือกที่ 3
+                    'models/gemini-2.5-pro',            # ดีที่สุดแต่ช้ากว่า
+                    'models/gemini-pro-latest',         # fallback
+                ]
+                
+                for model_name in model_names:
+                    try:
+                        model = genai.GenerativeModel(model_name)
+                        logger.info(f"✅ Using Gemini model: {model_name}")
+                        
+                        logger.info("🚀 Calling Gemini API for news analysis...")
+                        
+                        # Generate content
+                        response = model.generate_content(prompt)
+                        
+                        logger.info("✅ Gemini API responded")
+                        
+                        if response and hasattr(response, 'text') and response.text:
+                            logger.info(f"📊 Analysis result length: {len(response.text)} characters")
+                            return response.text.strip()
+                        else:
+                            logger.warning("⚠️ Gemini returned empty response")
+                            continue
+                            
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        
+                        # ตรวจสอบ Rate Limit Error
+                        if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "resource_exhausted" in error_msg:
+                            logger.warning(f"⚠️ Gemini rate limit exceeded on {model_name}: {e}")
+                            logger.info("🔄 Switching to Groq API...")
+                            break  # ออกจาก loop และไปใช้ Groq
+                        else:
+                            logger.warning(f"⚠️ Cannot use {model_name}: {e}")
+                            continue
+                
+            except ImportError as e:
+                logger.error(f"❌ Cannot import google.generativeai: {e}")
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "resource_exhausted" in error_msg:
+                    logger.warning(f"⚠️ Gemini rate limit exceeded: {e}")
+                    logger.info("🔄 Switching to Groq API...")
+                else:
+                    logger.error(f"❌ Gemini news analysis error: {e}")
         
-        logger.info("✅ Gemini API responded")
+        # ถ้า Gemini ล้มเหลว ให้ใช้ Groq
+        if has_groq:
+            logger.info("🔄 Falling back to Groq API for news analysis...")
+            result = analyze_with_groq(prompt, f"news analysis for {symbol}")
+            if result:
+                return result
         
-        if response and hasattr(response, 'text') and response.text:
-            logger.info(f"📊 Analysis result length: {len(response.text)} characters")
-            return response.text.strip()
-        else:
-            logger.warning("⚠️ Gemini returned empty response")
-            return None
+        logger.error("❌ All AI APIs failed for news analysis")
+        return None
         
     except Exception as e:
-        logger.error(f"❌ Gemini analysis error: {e}")
+        logger.error(f"❌ News analysis error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return None 
