@@ -476,7 +476,7 @@ PART 4: สรุปรวมและคำแนะนำ
                         
                         if response and hasattr(response, 'text') and response.text:
                             logger.info(f"📊 Combined analysis result length: {len(response.text)} characters")
-                            return response.text.strip()
+                            return response.text.strip() + "\n═══════\n🤖 วิเคราะห์โดย: Gemini AI"
                             
                     except ResourceExhausted as e:  # เพิ่ม except นี้
                         logger.warning(f"⚠️ Gemini quota exceeded on {model_name}")
@@ -510,7 +510,7 @@ PART 4: สรุปรวมและคำแนะนำ
             logger.info("🔄 Falling back to Groq API...")
             result = analyze_with_groq(prompt, f"combined analysis for {symbol}")
             if result:
-                return result
+                return result + "\n═══════\n🤖 วิเคราะห์โดย: Groq AI"
         
         logger.error("❌ All AI APIs failed")
         return None
@@ -809,7 +809,7 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
                         
                         if response and hasattr(response, 'text') and response.text:
                             logger.info(f"📊 Comparison analysis result length: {len(response.text)} characters")
-                            return response.text.strip()
+                            return response.text.strip() + "\n═══════\n🤖 วิเคราะห์โดย: Gemini AI"
                         else:
                             logger.warning("⚠️ Gemini returned empty response")
                             continue
@@ -846,7 +846,8 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
             logger.info("🔄 Falling back to Groq API for comparison...")
             result = analyze_with_groq(prompt, f"comparison {symbol1} vs {symbol2}")
             if result:
-                return result
+                return result + "\n═══════\n🤖 วิเคราะห์โดย: Groq AI"
+
         
         logger.error("❌ All AI APIs failed for comparison")
         return None
@@ -1017,7 +1018,7 @@ def analyze_news_with_gemini(news_list, symbol):
                         
                         if response and hasattr(response, 'text') and response.text:
                             logger.info(f"📊 Analysis result length: {len(response.text)} characters")
-                            return response.text.strip()
+                            return response.text.strip() + "\n═══════\n🤖 วิเคราะห์โดย: Gemini AI"
                         else:
                             logger.warning("⚠️ Gemini returned empty response")
                             continue
@@ -1054,7 +1055,7 @@ def analyze_news_with_gemini(news_list, symbol):
             logger.info("🔄 Falling back to Groq API for news analysis...")
             result = analyze_with_groq(prompt, f"news analysis for {symbol}")
             if result:
-                return result
+                return result + "\n═══════\n🤖 วิเคราะห์โดย: Groq AI"
         
         logger.error("❌ All AI APIs failed for news analysis")
         return None
