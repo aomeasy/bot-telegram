@@ -1408,6 +1408,174 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # เรียกใช้ฟังก์ชันวิเคราะห์
     await perform_aiplus_analysis(processing, symbol)
 
+async def perform_aiplus_analysis(message, symbol: str):
+    """ฟังก์ชันหลักสำหรับวิเคราะห์แบบรวม (ใช้ร่วมกันได้ทั้ง command และ button)"""
+    
+    # ตรวจสอบ API Keys
+    if not FINNHUB_KEY or FINNHUB_KEY == "":
+        await message.edit_text(
+            "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
+            "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
+            "รับ Free API Key: https://finnhub.io/register",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+        await message.edit_text(
+            "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
+            "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
+            "รับ Free API Key: https://makersuite.google.com/app/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
+        await message.edit_text(
+            "⚠️ **ไม่พบ TWELVE_DATA_KEY**\n\n"
+            "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment\n"
+            "รับ Free API Key: https://twelvedata.com/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 1. ดึงข้อมูลข่าว
+    news_data = get_company_news(symbol, days=NEWS_DAYS_RANGE)
+    
+    if not news_data or len(news_data) == 0:
+        await message.edit_text(
+            f"❌ ไม่พบข่าวสำหรับ {symbol}\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Symbol ไม่ถูกต้อง\n"
+            f"• ไม่มีข่าวในช่วง 7 วันที่ผ่านมา\n\n"
+            f"ลอง /popular เพื่อดูหุ้นยอดนิยม",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 2. ดึงข้อมูลเทคนิค
+    quote = get_quote(symbol)
+    if not quote or 'close' not in quote:
+        await message.edit_text(
+            f"❌ ไม่สามารถดึงข้อมูลเทคนิคของ {symbol} ได้\n\n"
+            f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # เก็บข้อมูลเทคนิค
+    current = float(quote['close'])
+    prev_close = float(quote.get('previous_close', current))
+    change = current - prev_close
+    change_pct = (change / prev_close) * 100
+    
+    technical_data = {
+        'current': current,
+        'change_pct': change_pct,
+        'rsi': get_rsi(symbol),
+        'macd': None,
+        'macd_signal': None,
+        'ema_20': get_ema(symbol, 20),
+        'ema_50': get_ema(symbol, 50),
+        'ema_200': get_ema(symbol, 200),
+        'bb_lower': None,
+        'bb_upper': None,
+        'bb_position': None,
+        'analyst_buy_pct': None,
+        'upside_pct': None
+    }
+    
+    # MACD
+    macd, macd_signal = get_macd(symbol)
+    if macd is not None:
+        technical_data['macd'] = macd
+        technical_data['macd_signal'] = macd_signal
+    
+    # Bollinger Bands
+    bb_lower, bb_upper = get_bbands(symbol)
+    if bb_lower and bb_upper:
+        technical_data['bb_lower'] = bb_lower
+        technical_data['bb_upper'] = bb_upper
+        technical_data['bb_position'] = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
+    
+    # Analyst recommendations
+    recommendations = get_analyst_recommendations(symbol)
+    if recommendations:
+        buy = recommendations.get('buy', 0)
+        hold = recommendations.get('hold', 0)
+        sell = recommendations.get('sell', 0)
+        total = buy + hold + sell
+        if total > 0:
+            technical_data['analyst_buy_pct'] = (buy / total) * 100
+    
+    # Price target
+    price_target = get_price_target(symbol)
+    if price_target and price_target['target_mean']:
+        target_mean = price_target['target_mean']
+        technical_data['upside_pct'] = ((target_mean - current) / current) * 100
+    
+    # 3. แปลข่าว
+    news_data = translate_news_batch(news_data)
+    
+    # 4. วิเคราะห์ด้วย AI แบบรวม
+    combined_analysis = analyze_combined_with_gemini(news_data, symbol, technical_data)
+    
+    if not combined_analysis:
+        await message.edit_text(
+            f"❌ **ไม่สามารถวิเคราะห์ได้**\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Gemini API มีปัญหา\n"
+            f"• API Key ไม่ถูกต้อง\n"
+            f"• Network error\n\n"
+            f"💡 ลอง /ai {symbol} หรือ /news {symbol}",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # 5. สร้างรายงาน
+    report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
+    report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
+    report += combined_analysis
+    report += f"\n\n{'─'*35}\n"
+    report += f"📅 วิเคราะห์จาก {len(news_data)} ข่าว + ข้อมูลเทคนิค\n"
+    report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    report += f"💡 ข่าว: /news {symbol}"
+    
+    try:
+        if len(report) > 4000:
+            max_length = 3500
+            first_part = report[:max_length]
+            last_newline = first_part.rfind('\n')
+            if last_newline > 3000:
+                first_part = report[:last_newline]
+                second_part = report[last_newline+1:]
+            else:
+                first_part = report[:max_length]
+                second_part = report[max_length:]
+            
+            await message.edit_text(first_part, disable_web_page_preview=True)
+            
+            # Get chat_id from message
+            chat_id = message.chat_id if hasattr(message, 'chat_id') else message.chat.id
+            await message.get_bot().send_message(
+                chat_id=chat_id,
+                text=second_part,
+                disable_web_page_preview=True
+            )
+        else:
+            await message.edit_text(report, disable_web_page_preview=True)
+            
+    except Exception as e:
+        logger.error(f"Error sending aiplus analysis: {e}")
+        short_report = f"🤖 AI วิเคราะห์ {symbol.upper()}\n"
+        short_report += f"💰 ${current:.2f} ({change_pct:+.2f}%)\n\n"
+        short_report += combined_analysis[:3000] + "\n\n...(ตัดข้อความ)\n\n"
+        short_report += f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        
+        try:
+            await message.edit_text(short_report, disable_web_page_preview=True)
+        except:
+            await message.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
 
 # เพิ่มฟังก์ชัน callback handler สำหรับจัดการปุ่ม
 async def stock_category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
