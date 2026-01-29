@@ -516,6 +516,366 @@ PART 4: สรุปรวมและคำแนะนำ
         return None
 
 
+
+def analyze_comparison_with_gemini(stock1_data, stock2_data, symbol1, symbol2):
+    """วิเคราะห์เปรียบเทียบ 2 หุ้นด้วย Gemini AI"""
+    try:
+        if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+            logger.warning("⚠️ No Gemini API key found - skipping AI comparison")
+            return None
+        
+        logger.info(f"🔍 Starting Gemini comparison analysis: {symbol1} vs {symbol2}...")
+        
+        try:
+            import google.generativeai as genai
+        except ImportError as e:
+            logger.error(f"❌ Cannot import google.generativeai: {e}")
+            return None
+        
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        model_names = [
+            'models/gemini-2.5-flash',
+            'models/gemini-flash-latest',
+            'models/gemini-2.0-flash',
+            'models/gemini-2.5-pro',
+            'models/gemini-pro-latest',
+        ]
+        
+        model = None
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                logger.info(f"✅ Using Gemini model: {model_name}")
+                break
+            except Exception as e:
+                logger.warning(f"⚠️ Cannot use {model_name}: {e}")
+                continue
+        
+        if model is None:
+            logger.error("❌ Cannot initialize any Gemini model")
+            return None
+        
+        # เตรียมข้อมูล Stock 1
+        s1 = stock1_data
+        stock1_info = f"""
+หุ้น {symbol1}:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 ราคาปัจจุบัน: ${s1['current']:.2f}
+📊 เปลี่ยนแปลง: {s1['change_pct']:+.2f}%
+
+📈 ตัวชี้วัดเทคนิค:
+- RSI (14): {s1.get('rsi', 'N/A')}
+- MACD: {s1.get('macd', 'N/A')} | Signal: {s1.get('macd_signal', 'N/A')}
+- EMA 20: ${s1.get('ema_20', 0):.2f}
+- EMA 50: ${s1.get('ema_50', 0):.2f}
+- EMA 200: ${s1.get('ema_200', 0):.2f}
+- Bollinger Upper: ${s1.get('bb_upper', 0):.2f}
+- Bollinger Lower: ${s1.get('bb_lower', 0):.2f}
+- ตำแหน่งในแบนด์: {s1.get('bb_position', 0):.0f}%
+
+💎 Valuation:
+- Upside Potential: {s1.get('upside_pct', 'N/A')}%
+- นักวิเคราะห์แนะนำซื้อ: {s1.get('analyst_buy_pct', 'N/A')}%
+
+📰 ข่าวล่าสุด (5 ข่าว):
+{s1.get('news_summary', 'ไม่มีข่าว')}
+"""
+        
+        # เตรียมข้อมูล Stock 2
+        s2 = stock2_data
+        stock2_info = f"""
+หุ้น {symbol2}:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 ราคาปัจจุบัน: ${s2['current']:.2f}
+📊 เปลี่ยนแปลง: {s2['change_pct']:+.2f}%
+
+📈 ตัวชี้วัดเทคนิค:
+- RSI (14): {s2.get('rsi', 'N/A')}
+- MACD: {s2.get('macd', 'N/A')} | Signal: {s2.get('macd_signal', 'N/A')}
+- EMA 20: ${s2.get('ema_20', 0):.2f}
+- EMA 50: ${s2.get('ema_50', 0):.2f}
+- EMA 200: ${s2.get('ema_200', 0):.2f}
+- Bollinger Upper: ${s2.get('bb_upper', 0):.2f}
+- Bollinger Lower: ${s2.get('bb_lower', 0):.2f}
+- ตำแหน่งในแบนด์: {s2.get('bb_position', 0):.0f}%
+
+💎 Valuation:
+- Upside Potential: {s2.get('upside_pct', 'N/A')}%
+- นักวิเคราะห์แนะนำซื้อ: {s2.get('analyst_buy_pct', 'N/A')}%
+
+📰 ข่าวล่าสุด (5 ข่าว):
+{s2.get('news_summary', 'ไม่มีข่าว')}
+"""
+        
+        prompt = f"""{stock1_info}
+
+{stock2_info}
+
+จากข้อมูลทั้ง 2 หุ้น ให้วิเคราะห์เปรียบเทียบดังนี้:
+
+═══════════════════════════════════
+PART 1: เปรียบเทียบตัวชี้วัดเทคนิค
+═══════════════════════════════════
+📊 Technical Score Comparison:
+
+🔴 {symbol1}:
+- RSI: [วิเคราะห์ว่า Oversold/Neutral/Overbought]
+- MACD: [วิเคราะห์ว่า Bullish/Bearish]
+- EMA Trend: [วิเคราะห์ Uptrend/Downtrend/Sideways]
+- BB Position: [วิเคราะห์ตำแหน่งในแบนด์]
+- คะแนนเทคนิครวม: X/10
+
+🔵 {symbol2}:
+- RSI: [วิเคราะห์ว่า Oversold/Neutral/Overbought]
+- MACD: [วิเคราะห์ว่า Bullish/Bearish]
+- EMA Trend: [วิเคราะห์ Uptrend/Downtrend/Sideways]
+- BB Position: [วิเคราะห์ตำแหน่งในแบนด์]
+- คะแนนเทคนิครวม: X/10
+
+🏆 Winner (Technical): [ระบุตัวที่ดีกว่าและเหตุผล]
+
+─────────────────────────────────
+
+═══════════════════════════════════
+PART 2: เปรียบเทียบ Valuation
+═══════════════════════════════════
+💎 Value & Growth Potential:
+
+🔴 {symbol1}:
+- Upside Potential: [ระบุ %]
+- นักวิเคราะห์มองว่า: [Buy/Hold/Sell]
+- Margin of Safety: [สูง/กลาง/ต่ำ/ไม่มี]
+
+🔵 {symbol2}:
+- Upside Potential: [ระบุ %]
+- นักวิเคราะห์มองว่า: [Buy/Hold/Sell]
+- Margin of Safety: [สูง/กลาง/ต่ำ/ไม่มี]
+
+🏆 Winner (Valuation): [ระบุตัวที่ดีกว่าและเหตุผล]
+
+─────────────────────────────────
+
+═══════════════════════════════════
+PART 3: เปรียบเทียบข่าวและ Sentiment
+═══════════════════════════════════
+📰 News Sentiment:
+
+🔴 {symbol1}:
+- สัดส่วนข่าว: 🟢 X% | 🟡 X% | 🔴 X%
+- News Sentiment Score: X/10
+- ประเด็นสำคัญ: [สรุปข่าวหลัก 1-2 ประโยค]
+
+🔵 {symbol2}:
+- สัดส่วนข่าว: 🟢 X% | 🟡 X% | 🔴 X%
+- News Sentiment Score: X/10
+- ประเด็นสำคัญ: [สรุปข่าวหลัก 1-2 ประโยค]
+
+🏆 Winner (News): [ระบุตัวที่ดีกว่าและเหตุผล]
+
+─────────────────────────────────
+
+═══════════════════════════════════
+PART 4: การวิเคราะห์แบบแยกตาม Timeframe
+═══════════════════════════════════
+
+📅 ระยะสั้น (1-4 สัปดาห์):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 แนะนำ: [SYMBOL]
+เหตุผล:
+- [เหตุผลที่ 1 - เน้นเทคนิค]
+- [เหตุผลที่ 2]
+- [เหตุผลที่ 3]
+
+💰 จุดเข้าที่แนะนำ: $XXX
+🛡️ Stop Loss: $XXX (X% จากจุดเข้า)
+🎯 Target: $XXX (X% Profit)
+
+ระดับความมั่นใจ: [สูง/กลาง/ต่ำ]
+ความเสี่ยง: 🟢/🟡/🔴
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 ระยะกลาง (1-3 เดือน):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 แนะนำ: [SYMBOL]
+เหตุผล:
+- [เหตุผลที่ 1 - เน้นเทรนด์และ Valuation]
+- [เหตุผลที่ 2]
+- [เหตุผลที่ 3]
+
+💰 จุดเข้าที่แนะนำ: $XXX
+🛡️ Stop Loss: $XXX (X% จากจุดเข้า)
+🎯 Target: $XXX (X% Profit)
+
+ระดับความมั่นใจ: [สูง/กลาง/ต่ำ]
+ความเสี่ยง: 🟢/🟡/🔴
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 ระยะยาว (6 เดือน - 1 ปี+):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 แนะนำ: [SYMBOL]
+เหตุผล:
+- [เหตุผลที่ 1 - เน้น Fundamentals และแนวโน้มอุตสาหกรรม]
+- [เหตุผลที่ 2]
+- [เหตุผลที่ 3]
+
+💰 จุดเข้าที่แนะนำ: $XXX หรือรอปรับฐาน
+🛡️ Stop Loss: $XXX (X% จากจุดเข้า)
+🎯 Target: $XXX (X% Profit)
+
+ระดับความมั่นใจ: [สูง/กลาง/ต่ำ]
+ความเสี่ยง: 🟢/🟡/🔴
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+═══════════════════════════════════
+PART 5: คะแนนรวมและคำแนะนำสุดท้าย
+═══════════════════════════════════
+
+📊 คะแนนรวมทุกด้าน:
+
+🔴 {symbol1}: X/10
+   • Technical: X/10
+   • Valuation: X/10
+   • News Sentiment: X/10
+
+🔵 {symbol2}: X/10
+   • Technical: X/10
+   • Valuation: X/10
+   • News Sentiment: X/10
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏆 **คำตอบขั้นสุดท้าย:**
+
+ถ้าเลือกได้อันเดียว ควรซื้อ: **[SYMBOL]**
+
+เหตุผล: [สรุปเหตุผลหลักๆ 2-3 ประโยค]
+
+⚠️ **ข้อควรระวัง:**
+- {symbol1}: [จุดอ่อนหลัก]
+- {symbol2}: [จุดอ่อนหลัก]
+
+💡 **กลยุทธ์ทางเลือก:**
+[เสนอกลยุทธ์เช่น ถือทั้ง 2 ตัว, รอจังหวะ, หรือ DCA]
+
+═══════════════════════════════════
+
+**รูปแบบตอบ:**
+- ใช้ภาษาไทยที่เข้าใจง่าย
+- กระชับ ตรงประเด็น
+- ห้ามใช้ markdown ** หรือ __ เด็ดขาด
+- ใช้ separator ───── หรือ ═════ แบ่งส่วน
+- ใช้เพียง emoji และข้อความธรรมดา
+- ต้องมีคำตอบที่ชัดเจนว่าควรซื้อตัวไหน
+
+เริ่มวิเคราะห์:
+"""
+
+        logger.info("🚀 Calling Gemini API for comparison analysis...")
+        
+        response = model.generate_content(prompt)
+        
+        logger.info("✅ Gemini API responded")
+        
+        if response and hasattr(response, 'text') and response.text:
+            logger.info(f"📊 Comparison analysis result length: {len(response.text)} characters")
+            return response.text.strip()
+        else:
+            logger.warning("⚠️ Gemini returned empty response")
+            return None
+        
+    except Exception as e:
+        logger.error(f"❌ Comparison Gemini analysis error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+
+async def get_stock_data_for_comparison(symbol):
+    """ดึงข้อมูลหุ้นสำหรับการเปรียบเทียบ"""
+    try:
+        # ดึงข้อมูลเทคนิค
+        quote = get_quote(symbol)
+        if not quote or 'close' not in quote:
+            return None
+        
+        current = float(quote['close'])
+        prev_close = float(quote.get('previous_close', current))
+        change = current - prev_close
+        change_pct = (change / prev_close) * 100
+        
+        # รวบรวมข้อมูลเทคนิค
+        stock_data = {
+            'symbol': symbol,
+            'current': current,
+            'change_pct': change_pct,
+            'rsi': get_rsi(symbol),
+            'macd': None,
+            'macd_signal': None,
+            'ema_20': get_ema(symbol, 20),
+            'ema_50': get_ema(symbol, 50),
+            'ema_200': get_ema(symbol, 200),
+            'bb_lower': None,
+            'bb_upper': None,
+            'bb_position': None,
+            'analyst_buy_pct': None,
+            'upside_pct': None,
+            'news_summary': ''
+        }
+        
+        # MACD
+        macd, macd_signal = get_macd(symbol)
+        if macd is not None:
+            stock_data['macd'] = macd
+            stock_data['macd_signal'] = macd_signal
+        
+        # Bollinger Bands
+        bb_lower, bb_upper = get_bbands(symbol)
+        if bb_lower and bb_upper:
+            stock_data['bb_lower'] = bb_lower
+            stock_data['bb_upper'] = bb_upper
+            stock_data['bb_position'] = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
+        
+        # Analyst recommendations
+        recommendations = get_analyst_recommendations(symbol)
+        if recommendations:
+            buy = recommendations.get('buy', 0)
+            hold = recommendations.get('hold', 0)
+            sell = recommendations.get('sell', 0)
+            total = buy + hold + sell
+            if total > 0:
+                stock_data['analyst_buy_pct'] = (buy / total) * 100
+        
+        # Price target
+        price_target = get_price_target(symbol)
+        if price_target and price_target['target_mean']:
+            target_mean = price_target['target_mean']
+            stock_data['upside_pct'] = ((target_mean - current) / current) * 100
+        
+        # ดึงข่าว
+        news_data = get_company_news(symbol, days=7)
+        if news_data and len(news_data) > 0:
+            news_data = translate_news_batch(news_data)
+            
+            # สร้างสรุปข่าว
+            news_summary = ""
+            for i, news in enumerate(news_data[:5], 1):
+                headline = news.get('headline_th', news.get('headline', ''))
+                if len(headline) > 100:
+                    headline = headline[:97] + "..."
+                news_summary += f"{i}. {headline}\n"
+            
+            stock_data['news_summary'] = news_summary.strip()
+        
+        return stock_data
+        
+    except Exception as e:
+        logger.error(f"Error getting stock data for {symbol}: {e}")
+        return None
+        
 def analyze_news_with_gemini(news_list, symbol):
     """วิเคราะห์ข่าวด้วย Gemini AI"""
     try:
@@ -1408,6 +1768,196 @@ async def aiplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # เรียกใช้ฟังก์ชันวิเคราะห์
     await perform_aiplus_analysis(processing, symbol)
 
+
+
+async def compare_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """เปรียบเทียบ 2 หุ้น - /compare SYMBOL1 SYMBOL2"""
+    
+    # ตรวจสอบ arguments
+    if not context.args or len(context.args) < 2:
+        help_text = """⚖️ **เปรียบเทียบหุ้น 2 ตัว**
+
+**วิธีใช้:**
+/compare SYMBOL1 SYMBOL2
+
+**ตัวอย่าง:**
+/compare AMZN NVDA - เปรียบเทียบ Amazon vs Nvidia
+/compare AAPL MSFT - เปรียบเทียบ Apple vs Microsoft
+/compare TSLA RKLB - เปรียบเทียบ Tesla vs Rocket Lab
+
+💡 **AI จะวิเคราะห์:**
+✅ ตัวชี้วัดเทคนิค (RSI, MACD, EMA, BB)
+✅ Valuation & Upside Potential
+✅ ข่าวและ Sentiment
+✅ แนะนำแยกตาม Timeframe:
+   • ระยะสั้น (1-4 สัปดาห์)
+   • ระยะกลาง (1-3 เดือน)
+   • ระยะยาว (6 เดือน - 1 ปี+)
+
+🎯 **ได้คำตอบชัดเจน:** ควรซื้อตัวไหน และทำไม"""
+        
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+        return
+    
+    symbol1 = context.args[0].strip().upper()
+    symbol2 = context.args[1].strip().upper()
+    
+    # Validate symbols
+    for symbol in [symbol1, symbol2]:
+        if len(symbol) < MIN_SYMBOL_LENGTH or len(symbol) > MAX_SYMBOL_LENGTH or not symbol.isalpha():
+            await update.message.reply_text(
+                f"❌ Symbol '{symbol}' ไม่ถูกต้อง\n"
+                f"กรุณาใช้ตัวอักษร 1-6 ตัว เช่น: /compare AAPL MSFT",
+                parse_mode='Markdown'
+            )
+            return
+    
+    # ตรวจสอบว่าไม่ใช่หุ้นตัวเดียวกัน
+    if symbol1 == symbol2:
+        await update.message.reply_text(
+            "❌ กรุณาเลือกหุ้น 2 ตัวที่แตกต่างกัน",
+            parse_mode='Markdown'
+        )
+        return
+    
+    processing = await update.message.reply_text(
+        f"⚖️ กำลังเปรียบเทียบ {symbol1} vs {symbol2}...\n\n"
+        f"⏳ กำลังรวบรวมข้อมูล:\n"
+        f"  • {symbol1}: ราคา, RSI, MACD, EMA, ข่าว...\n"
+        f"  • {symbol2}: ราคา, RSI, MACD, EMA, ข่าว...\n"
+        f"  • 🤖 AI กำลังวิเคราะห์เปรียบเทียบ...",
+        parse_mode='Markdown'
+    )
+    
+    # ตรวจสอบ API Keys
+    if not TWELVE_DATA_KEY or TWELVE_DATA_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ TWELVE_DATA_KEY**\n\n"
+            "กรุณาตั้งค่า TWELVE_DATA_KEY ใน Environment\n"
+            "รับ Free API Key: https://twelvedata.com/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not FINNHUB_KEY or FINNHUB_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ FINNHUB_KEY**\n\n"
+            "กรุณาตั้งค่า FINNHUB_KEY ใน Environment\n"
+            "รับ Free API Key: https://finnhub.io/register",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "":
+        await processing.edit_text(
+            "⚠️ **ไม่พบ GEMINI_API_KEY**\n\n"
+            "กรุณาตั้งค่า GEMINI_API_KEY ใน Environment\n"
+            "รับ Free API Key: https://makersuite.google.com/app/apikey",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # ดึงข้อมูลหุ้นทั้ง 2 ตัว
+    stock1_data = await get_stock_data_for_comparison(symbol1)
+    stock2_data = await get_stock_data_for_comparison(symbol2)
+    
+    # ตรวจสอบว่าดึงข้อมูลได้หรือไม่
+    if not stock1_data:
+        await processing.edit_text(
+            f"❌ ไม่สามารถดึงข้อมูล {symbol1} ได้\n\n"
+            f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if not stock2_data:
+        await processing.edit_text(
+            f"❌ ไม่สามารถดึงข้อมูล {symbol2} ได้\n\n"
+            f"กรุณาตรวจสอบ Symbol หรือลองใหม่อีกครั้ง",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # วิเคราะห์เปรียบเทียบด้วย AI
+    comparison_analysis = analyze_comparison_with_gemini(
+        stock1_data, stock2_data, symbol1, symbol2
+    )
+    
+    if not comparison_analysis:
+        await processing.edit_text(
+            f"❌ **ไม่สามารถวิเคราะห์เปรียบเทียบได้**\n\n"
+            f"อาจเป็นเพราะ:\n"
+            f"• Gemini API มีปัญหา\n"
+            f"• API Key ไม่ถูกต้อง\n"
+            f"• Network error\n\n"
+            f"💡 ลอง /aiplus {symbol1} หรือ /aiplus {symbol2}",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # สร้างรายงาน
+    report = f"⚖️ **เปรียบเทียบ {symbol1} vs {symbol2}**\n\n"
+    
+    # แสดงข้อมูลพื้นฐาน
+    report += f"🔴 **{symbol1}:** ${stock1_data['current']:.2f} "
+    report += f"({stock1_data['change_pct']:+.2f}%)\n"
+    
+    report += f"🔵 **{symbol2}:** ${stock2_data['current']:.2f} "
+    report += f"({stock2_data['change_pct']:+.2f}%)\n\n"
+    
+    report += f"{'═'*35}\n\n"
+    
+    # AI Analysis
+    report += comparison_analysis
+    
+    # Footer
+    report += f"\n\n{'─'*35}\n"
+    report += f"📅 เปรียบเทียบจากข้อมูล: ข่าว + เทคนิค + Valuation\n"
+    report += f"⏰ {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    report += f"💡 ดูรายละเอียด:\n"
+    report += f"  • /aiplus {symbol1}\n"
+    report += f"  • /aiplus {symbol2}"
+    
+    try:
+        # เช็คความยาว
+        if len(report) > 4000:
+            # แบ่งส่ง 2 ส่วน
+            max_length = 3500
+            
+            first_part = report[:max_length]
+            last_newline = first_part.rfind('\n')
+            if last_newline > 3000:
+                first_part = report[:last_newline]
+                second_part = report[last_newline+1:]
+            else:
+                first_part = report[:max_length]
+                second_part = report[max_length:]
+            
+            await processing.edit_text(first_part, disable_web_page_preview=True)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=second_part,
+                disable_web_page_preview=True
+            )
+        else:
+            await processing.edit_text(report, disable_web_page_preview=True)
+            
+    except Exception as e:
+        logger.error(f"Error sending comparison report: {e}")
+        # Fallback: ส่งแบบสั้น
+        short_report = f"⚖️ **{symbol1} vs {symbol2}**\n\n"
+        short_report += f"🔴 {symbol1}: ${stock1_data['current']:.2f} "
+        short_report += f"({stock1_data['change_pct']:+.2f}%)\n"
+        short_report += f"🔵 {symbol2}: ${stock2_data['current']:.2f} "
+        short_report += f"({stock2_data['change_pct']:+.2f}%)\n\n"
+        short_report += comparison_analysis[:3000] + "\n\n...(ตัดข้อความ)\n\n"
+        short_report += f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        
+        try:
+            await processing.edit_text(short_report, disable_web_page_preview=True)
+        except:
+            await processing.edit_text("❌ ข้อความยาวเกินไป กรุณาลองใหม่")
+            
 async def perform_aiplus_analysis(message, symbol: str):
     """ฟังก์ชันหลักสำหรับวิเคราะห์แบบรวม (ใช้ร่วมกันได้ทั้ง command และ button)"""
     
@@ -1961,6 +2511,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - /news SYMBOL - ดูข่าวล่าสุด
 - /ai SYMBOL - AI วิเคราะห์ข่าว 
 - /aiplus SYMBOL - AI วิเคราะห์แบบรวม (ข่าว+เทคนิค) 🚀
+- /compare SYMBOL1 SYMBOL2 - เปรียบเทียบ 2 หุ้น ⚖️ NEW!
 - /help - ดูคำแนะนำ
 - /popular - ดูหุ้นยอดนิยม
 
@@ -1974,7 +2525,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 **ทำไมต้อง /aiplus:**
 ✅ วิเคราะห์ครบ 360° - ทั้งข่าวและกราฟ
 ✅ จับสัญญาณขัดแย้ง - ข่าวดีแต่เทคนิคขาลง? AI จะเตือน
-✅ คำแนะนำการเทรด - รู้ว่าควรเข้าตอนไหน ตั้ง SL ที่ไหน"""
+✅ คำแนะนำการเทรด - รู้ว่าควรเข้าตอนไหน ตั้ง SL ที่ไหน
+
+🎯 **ทำไมต้อง /compare:**
+✅ เปรียบเทียบ 2 หุ้นแบบครบมิติ
+✅ แนะนำแยกตาม Timeframe (สั้น/กลาง/ยาว)
+✅ ได้คำตอบชัดเจน - ควรซื้อตัวไหน"""
     await update.message.reply_text(welcome, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2014,6 +2570,7 @@ Death Cross: EMA 50 ตัดลง EMA 200 = สัญญาณขายแร�
 **คำสั่ง:**
 /news SYMBOL - ดูข่าวของหุ้น
 /ai SYMBOL - AI วิเคราะห์ว่าข่าวดีหรือไม่ดี
+/compare AAPL MSFT - เปรียบเทียบ 2 หุ้น ⚖️
 /popular - ดูหุ้นยอดนิยม"""
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -2090,6 +2647,7 @@ def main():
     application.add_handler(CommandHandler("news", news_command))
     application.add_handler(CommandHandler("ai", ai_analysis_command))  
     application.add_handler(CommandHandler("aiplus", aiplus_command))
+    application.add_handler(CommandHandler("compare", compare_command))
     application.add_handler(CommandHandler("health", health_check))
     application.add_handler(CallbackQueryHandler(stock_category_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_stock))
