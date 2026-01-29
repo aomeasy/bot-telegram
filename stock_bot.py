@@ -455,6 +455,7 @@ PART 4: สรุปรวมและคำแนะนำ
         if has_gemini:
             try:
                 import google.generativeai as genai
+                from google.api_core.exceptions import ResourceExhausted  # เพิ่มบรรทัดนี้
                 genai.configure(api_key=GEMINI_API_KEY)
                 
                 model_names = [
@@ -476,6 +477,11 @@ PART 4: สรุปรวมและคำแนะนำ
                         if response and hasattr(response, 'text') and response.text:
                             logger.info(f"📊 Combined analysis result length: {len(response.text)} characters")
                             return response.text.strip()
+                            
+                    except ResourceExhausted as e:  # เพิ่ม except นี้
+                        logger.warning(f"⚠️ Gemini quota exceeded on {model_name}")
+                        logger.info("🔄 Switching to Groq API due to rate limit...")
+                        break  # ออกจาก loop ทันที
                             
                     except Exception as e:
                         error_msg = str(e).lower()
@@ -780,6 +786,7 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
         if has_gemini:
             try:
                 import google.generativeai as genai
+                from google.api_core.exceptions import ResourceExhausted
                 genai.configure(api_key=GEMINI_API_KEY)
                 
                 model_names = [
@@ -806,6 +813,11 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
                         else:
                             logger.warning("⚠️ Gemini returned empty response")
                             continue
+                            
+                    except ResourceExhausted as e:  # เพิ่ม except นี้
+                        logger.warning(f"⚠️ Gemini quota exceeded on {model_name}")
+                        logger.info("🔄 Switching to Groq API due to rate limit...")
+                        break
                             
                     except Exception as e:
                         error_msg = str(e).lower()
@@ -979,6 +991,7 @@ def analyze_news_with_gemini(news_list, symbol):
         if has_gemini:
             try:
                 import google.generativeai as genai
+                from google.api_core.exceptions import ResourceExhausted
                 genai.configure(api_key=GEMINI_API_KEY)
                 
                 # ใช้โมเดลที่ใช้งานได้จริง
@@ -1008,6 +1021,11 @@ def analyze_news_with_gemini(news_list, symbol):
                         else:
                             logger.warning("⚠️ Gemini returned empty response")
                             continue
+                            
+                    except ResourceExhausted as e:  # เพิ่ม except นี้
+                        logger.warning(f"⚠️ Gemini quota exceeded on {model_name}")
+                        logger.info("🔄 Switching to Groq API due to rate limit...")
+                        break
                             
                     except Exception as e:
                         error_msg = str(e).lower()
