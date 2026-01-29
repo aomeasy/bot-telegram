@@ -556,6 +556,32 @@ def analyze_comparison_with_gemini(stock1_data, stock2_data, symbol1, symbol2):
             logger.error("❌ Cannot initialize any Gemini model")
             return None
         
+        # ฟังก์ชันช่วยจัดรูปแบบตัวเลข (ป้องกัน None)
+        def safe_format(value, format_spec=':.2f', default='N/A'):
+            """จัดรูปแบบตัวเลขอย่างปลอดภัย"""
+            if value is None:
+                return default
+            try:
+                if format_spec == ':.2f':
+                    return f"${value:.2f}"
+                elif format_spec == ':.0f':
+                    return f"{value:.0f}"
+                elif format_spec == ':.1f':
+                    return f"{value:.1f}"
+                else:
+                    return str(value)
+            except:
+                return default
+        
+        def safe_percent(value, default='N/A'):
+            """แสดงเปอร์เซ็นต์อย่างปลอดภัย"""
+            if value is None:
+                return default
+            try:
+                return f"{value:.1f}%"
+            except:
+                return default
+        
         # เตรียมข้อมูล Stock 1
         s1 = stock1_data
         stock1_info = f"""
@@ -565,18 +591,18 @@ def analyze_comparison_with_gemini(stock1_data, stock2_data, symbol1, symbol2):
 📊 เปลี่ยนแปลง: {s1['change_pct']:+.2f}%
 
 📈 ตัวชี้วัดเทคนิค:
-- RSI (14): {s1.get('rsi', 'N/A')}
-- MACD: {s1.get('macd', 'N/A')} | Signal: {s1.get('macd_signal', 'N/A')}
-- EMA 20: ${s1.get('ema_20', 0):.2f}
-- EMA 50: ${s1.get('ema_50', 0):.2f}
-- EMA 200: ${s1.get('ema_200', 0):.2f}
-- Bollinger Upper: ${s1.get('bb_upper', 0):.2f}
-- Bollinger Lower: ${s1.get('bb_lower', 0):.2f}
-- ตำแหน่งในแบนด์: {s1.get('bb_position', 0):.0f}%
+- RSI (14): {safe_format(s1.get('rsi'), ':.1f', 'N/A')}
+- MACD: {safe_format(s1.get('macd'), ':.2f', 'N/A')} | Signal: {safe_format(s1.get('macd_signal'), ':.2f', 'N/A')}
+- EMA 20: {safe_format(s1.get('ema_20'), ':.2f', 'N/A')}
+- EMA 50: {safe_format(s1.get('ema_50'), ':.2f', 'N/A')}
+- EMA 200: {safe_format(s1.get('ema_200'), ':.2f', 'N/A')}
+- Bollinger Upper: {safe_format(s1.get('bb_upper'), ':.2f', 'N/A')}
+- Bollinger Lower: {safe_format(s1.get('bb_lower'), ':.2f', 'N/A')}
+- ตำแหน่งในแบนด์: {safe_percent(s1.get('bb_position'), 'N/A')}
 
 💎 Valuation:
-- Upside Potential: {s1.get('upside_pct', 'N/A')}%
-- นักวิเคราะห์แนะนำซื้อ: {s1.get('analyst_buy_pct', 'N/A')}%
+- Upside Potential: {safe_percent(s1.get('upside_pct'), 'N/A')}
+- นักวิเคราะห์แนะนำซื้อ: {safe_percent(s1.get('analyst_buy_pct'), 'N/A')}
 
 📰 ข่าวล่าสุด (5 ข่าว):
 {s1.get('news_summary', 'ไม่มีข่าว')}
@@ -591,18 +617,18 @@ def analyze_comparison_with_gemini(stock1_data, stock2_data, symbol1, symbol2):
 📊 เปลี่ยนแปลง: {s2['change_pct']:+.2f}%
 
 📈 ตัวชี้วัดเทคนิค:
-- RSI (14): {s2.get('rsi', 'N/A')}
-- MACD: {s2.get('macd', 'N/A')} | Signal: {s2.get('macd_signal', 'N/A')}
-- EMA 20: ${s2.get('ema_20', 0):.2f}
-- EMA 50: ${s2.get('ema_50', 0):.2f}
-- EMA 200: ${s2.get('ema_200', 0):.2f}
-- Bollinger Upper: ${s2.get('bb_upper', 0):.2f}
-- Bollinger Lower: ${s2.get('bb_lower', 0):.2f}
-- ตำแหน่งในแบนด์: {s2.get('bb_position', 0):.0f}%
+- RSI (14): {safe_format(s2.get('rsi'), ':.1f', 'N/A')}
+- MACD: {safe_format(s2.get('macd'), ':.2f', 'N/A')} | Signal: {safe_format(s2.get('macd_signal'), ':.2f', 'N/A')}
+- EMA 20: {safe_format(s2.get('ema_20'), ':.2f', 'N/A')}
+- EMA 50: {safe_format(s2.get('ema_50'), ':.2f', 'N/A')}
+- EMA 200: {safe_format(s2.get('ema_200'), ':.2f', 'N/A')}
+- Bollinger Upper: {safe_format(s2.get('bb_upper'), ':.2f', 'N/A')}
+- Bollinger Lower: {safe_format(s2.get('bb_lower'), ':.2f', 'N/A')}
+- ตำแหน่งในแบนด์: {safe_percent(s2.get('bb_position'), 'N/A')}
 
 💎 Valuation:
-- Upside Potential: {s2.get('upside_pct', 'N/A')}%
-- นักวิเคราะห์แนะนำซื้อ: {s2.get('analyst_buy_pct', 'N/A')}%
+- Upside Potential: {safe_percent(s2.get('upside_pct'), 'N/A')}
+- นักวิเคราะห์แนะนำซื้อ: {safe_percent(s2.get('analyst_buy_pct'), 'N/A')}
 
 📰 ข่าวล่าสุด (5 ข่าว):
 {s2.get('news_summary', 'ไม่มีข่าว')}
@@ -770,6 +796,7 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
 - ใช้ separator ───── หรือ ═════ แบ่งส่วน
 - ใช้เพียง emoji และข้อความธรรมดา
 - ต้องมีคำตอบที่ชัดเจนว่าควรซื้อตัวไหน
+- ถ้าข้อมูลบางอย่างเป็น N/A ให้วิเคราะห์จากข้อมูลที่มี
 
 เริ่มวิเคราะห์:
 """
@@ -792,7 +819,6 @@ PART 5: คะแนนรวมและคำแนะนำสุดท้า
         import traceback
         logger.error(traceback.format_exc())
         return None
-
 
 async def get_stock_data_for_comparison(symbol):
     """ดึงข้อมูลหุ้นสำหรับการเปรียบเทียบ"""
