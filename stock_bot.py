@@ -21,6 +21,9 @@ FINNHUB_KEY = os.environ.get("FINNHUB_KEY", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")  
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")  # เพิ่มบรรทัดนี้
+# เพิ่มหลัง GROQ_API_KEY
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 # --- API Functions ---
 
@@ -186,6 +189,41 @@ def get_company_news(symbol, days=7):
         
     except Exception as e:
         logger.error(f"Error fetching company news: {e}")
+        return None
+
+
+def get_stock_data_from_supabase(symbol):
+    """ดึงข้อมูล snapshot ล่าสุดจาก Supabase"""
+    try:
+        from supabase import create_client
+        
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            logger.warning("⚠️ No Supabase credentials found")
+            return None
+        
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        
+        # ดึงข้อมูลล่าสุดของ symbol นี้
+        response = supabase.table('stock_snapshots') \
+            .select('*') \
+            .eq('symbol', symbol.upper()) \
+            .order('recorded_at', desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            data = response.data[0]
+            logger.info(f"✅ Found Supabase data for {symbol} from {data.get('recorded_at')}")
+            return data
+        else:
+            logger.warning(f"⚠️ No Supabase data found for {symbol}")
+            return None
+            
+    except ImportError:
+        logger.error("❌ supabase-py not installed. Install with: pip install supabase")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Supabase query error: {e}")
         return None
 
 def analyze_with_groq(prompt, context_name="analysis"):
@@ -2108,8 +2146,12 @@ async def perform_aiplus_analysis(message, symbol: str):
             parse_mode='Markdown'
         )
         return
-    
-    # เก็บข้อมูลเทคนิค
+
+
+
+
+
+# เก็บข้อมูลเทคนิค
     current = float(quote['close'])
     prev_close = float(quote.get('previous_close', current))
     change = current - prev_close
@@ -2128,7 +2170,9 @@ async def perform_aiplus_analysis(message, symbol: str):
         'bb_upper': None,
         'bb_position': None,
         'analyst_buy_pct': None,
-        'upside_pct': None
+        'upside_pct': None,
+        'data_source': 'API',  # เพิ่มบรรทัดนี้
+        'recorded_at': None    # เพิ่มบรรทัดนี้
     }
     
     # MACD
@@ -2143,6 +2187,52 @@ async def perform_aiplus_analysis(message, symbol: str):
         technical_data['bb_lower'] = bb_lower
         technical_data['bb_upper'] = bb_upper
         technical_data['bb_position'] = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
+    
+    # ตรวจสอบว่ามีข้อมูลครบหรือไม่ ถ้าไม่ครบให้ดึงจาก Supabase
+    missing_data = (
+        technical_data['rsi'] is None or 
+        technical_data['macd'] is None or 
+        technical_data['ema_20'] is None or 
+        technical_data['bb_lower'] is None
+    )
+    
+    if missing_data:
+        logger.info(f"⚠️ Some technical indicators missing for {symbol}, checking Supabase...")
+        supabase_data = get_stock_data_from_supabase(symbol)
+        
+        if supabase_data:
+            # ใช้ข้อมูลจาก Supabase ถ้าไม่มีจาก API
+            if technical_data['rsi'] is None and supabase_data.get('rsi'):
+                technical_data['rsi'] = float(supabase_data['rsi'])
+            
+            if technical_data['macd'] is None and supabase_data.get('macd'):
+                technical_data['macd'] = float(supabase_data['macd'])
+                if supabase_data.get('macd_signal'):
+                    technical_data['macd_signal'] = float(supabase_data['macd_signal'])
+            
+            if technical_data['ema_20'] is None and supabase_data.get('ema_20'):
+                technical_data['ema_20'] = float(supabase_data['ema_20'])
+            
+            if technical_data['ema_50'] is None and supabase_data.get('ema_50'):
+                technical_data['ema_50'] = float(supabase_data['ema_50'])
+            
+            if technical_data['ema_200'] is None and supabase_data.get('ema_200'):
+                technical_data['ema_200'] = float(supabase_data['ema_200'])
+            
+            if technical_data['bb_lower'] is None and supabase_data.get('bb_lower'):
+                technical_data['bb_lower'] = float(supabase_data['bb_lower'])
+                if supabase_data.get('bb_upper'):
+                    technical_data['bb_upper'] = float(supabase_data['bb_upper'])
+                    technical_data['bb_position'] = ((current - technical_data['bb_lower']) / 
+                                                     (technical_data['bb_upper'] - technical_data['bb_lower'])) * 100
+            
+            # เก็บข้อมูลแหล่งที่มาและวันที่
+            technical_data['data_source'] = 'Supabase (Snapshot)'
+            technical_data['recorded_at'] = supabase_data.get('recorded_at')
+            
+            logger.info(f"✅ Filled missing data from Supabase for {symbol}")
+            
+     
     
     # Analyst recommendations
     recommendations = get_analyst_recommendations(symbol)
@@ -2480,7 +2570,8 @@ async def aiplus_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
-    # เก็บข้อมูลเทคนิค
+    # เก็บข้อมูลเทคนิค 
+ 
     current = float(quote['close'])
     prev_close = float(quote.get('previous_close', current))
     change = current - prev_close
@@ -2499,7 +2590,9 @@ async def aiplus_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         'bb_upper': None,
         'bb_position': None,
         'analyst_buy_pct': None,
-        'upside_pct': None
+        'upside_pct': None,
+        'data_source': 'API',
+        'recorded_at': None
     }
     
     # MACD
@@ -2514,6 +2607,50 @@ async def aiplus_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         technical_data['bb_lower'] = bb_lower
         technical_data['bb_upper'] = bb_upper
         technical_data['bb_position'] = ((current - bb_lower) / (bb_upper - bb_lower)) * 100
+    
+    # ตรวจสอบว่ามีข้อมูลครบหรือไม่ ถ้าไม่ครบให้ดึงจาก Supabase
+    missing_data = (
+        technical_data['rsi'] is None or 
+        technical_data['macd'] is None or 
+        technical_data['ema_20'] is None or 
+        technical_data['bb_lower'] is None
+    )
+    
+    if missing_data:
+        logger.info(f"⚠️ Some technical indicators missing for {symbol}, checking Supabase...")
+        supabase_data = get_stock_data_from_supabase(symbol)
+        
+        if supabase_data:
+            if technical_data['rsi'] is None and supabase_data.get('rsi'):
+                technical_data['rsi'] = float(supabase_data['rsi'])
+            
+            if technical_data['macd'] is None and supabase_data.get('macd'):
+                technical_data['macd'] = float(supabase_data['macd'])
+                if supabase_data.get('macd_signal'):
+                    technical_data['macd_signal'] = float(supabase_data['macd_signal'])
+            
+            if technical_data['ema_20'] is None and supabase_data.get('ema_20'):
+                technical_data['ema_20'] = float(supabase_data['ema_20'])
+            
+            if technical_data['ema_50'] is None and supabase_data.get('ema_50'):
+                technical_data['ema_50'] = float(supabase_data['ema_50'])
+            
+            if technical_data['ema_200'] is None and supabase_data.get('ema_200'):
+                technical_data['ema_200'] = float(supabase_data['ema_200'])
+            
+            if technical_data['bb_lower'] is None and supabase_data.get('bb_lower'):
+                technical_data['bb_lower'] = float(supabase_data['bb_lower'])
+                if supabase_data.get('bb_upper'):
+                    technical_data['bb_upper'] = float(supabase_data['bb_upper'])
+                    technical_data['bb_position'] = ((current - technical_data['bb_lower']) / 
+                                                     (technical_data['bb_upper'] - technical_data['bb_lower'])) * 100
+            
+            technical_data['data_source'] = 'Supabase (Snapshot)'
+            technical_data['recorded_at'] = supabase_data.get('recorded_at')
+            
+            logger.info(f"✅ Filled missing data from Supabase for {symbol}")
+ 
+    
     
     # Analyst recommendations
     recommendations = get_analyst_recommendations(symbol)
@@ -2549,10 +2686,28 @@ async def aiplus_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
+ 
+
     # 5. สร้างรายงาน
     report = f"🤖 AI วิเคราะห์เต็มรูปแบบ {symbol.upper()}\n"
     report += f"💰 ราคา: ${current:.2f} ({change_pct:+.2f}%)\n"
     
+    # แสดงข้อมูลแหล่งที่มาถ้าเป็น Supabase
+    if technical_data.get('data_source') == 'Supabase (Snapshot)':
+        from datetime import datetime
+        recorded_at = technical_data.get('recorded_at', '')
+        if recorded_at:
+            try:
+                dt = datetime.fromisoformat(recorded_at.replace('Z', '+00:00'))
+                date_str = dt.strftime('%d/%m/%Y %H:%M')
+                report += f"📊 ข้อมูลเทคนิคจาก: Supabase Snapshot\n"
+                report += f"🕐 บันทึกเมื่อ: {date_str}\n"
+            except:
+                report += f"📊 ข้อมูลเทคนิคจาก: Supabase Snapshot\n"
+        else:
+            report += f"📊 ข้อมูลเทคนิคจาก: Supabase Snapshot\n"
+    
+    report += "\n"
     # AI Analysis
     report += combined_analysis
     
